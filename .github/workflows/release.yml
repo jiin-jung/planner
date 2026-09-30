@@ -1,0 +1,48 @@
+# v로 시작하는 태그(예: v0.4.1)를 푸시하면 맥용 dmg를 빌드해서 Releases에 올림
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-latest   # Apple Silicon (arm64)
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Planner v__VERSION__"
+          releaseDraft: false
+          prerelease: false
+          releaseBody: |
+            ## 설치
+            1. 아래 **Planner_*_aarch64.dmg** 를 받아서 열고, Planner를 응용 프로그램 폴더로 끌어다 놓기
+            2. 터미널에서 한 번 실행 (서명 안 된 앱이라 "손상됨" 경고 방지): `xattr -cr /Applications/Planner.app`
+            3. 이전 버전이 켜져 있으면 메뉴바 아이콘 우클릭 → 종료 후 새로 열기

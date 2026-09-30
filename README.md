@@ -44,3 +44,10 @@ npm run dev      # 개발 모드
 npm run build    # → src-tauri/target/release/bundle/macos/Planner.app
 ```
 처음 열 때 막히면 Finder에서 우클릭 → 열기 (또는 `xattr -cr /Applications/Planner.app`)
+
+## 배포 (GitHub Releases)
+```bash
+git add . && git commit -m "변경 내용"
+npm run release -- 0.4.1     # 버전 올리기 → 태그 → 푸시
+```
+10~15분 뒤 GitHub → Releases 에서 dmg 다운로드. 설치 후 `xattr -cr /Applications/Planner.app` 한 번 실행.
