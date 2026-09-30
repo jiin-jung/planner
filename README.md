@@ -18,8 +18,7 @@
    xattr -cr /Applications/Planner.app
    ```
 
-> Apple Silicon 맥 전용 · 서명되지 않은 앱이라 3번이 필요해요.
-> 업데이트할 때도 같은 방법으로 덮어쓰면 되고, 데이터는 그대로 유지돼요.
+> 업데이트할 때도 같은 방법으로 덮어쓰면 되고, 데이터는 그대로 유지됩니다.
 
 ## 기능
 
@@ -49,4 +48,4 @@ npm run dev                  # 실행
 npm run release -- 0.4.3     # 버전 올리고 릴리스 (GitHub Actions가 dmg 빌드)
 ```
 
-Tauri 2 · Vanilla JS · Rust
+Tauri 2 · Vanilla JS · Rust · [MIT License](LICENSE)
