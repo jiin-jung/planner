@@ -6,8 +6,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# 기본은 읽기 전용, 릴리스 업로드 잡에만 쓰기 권한
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -16,24 +17,30 @@ concurrency:
 jobs:
   macos:
     runs-on: macos-latest   # Apple Silicon (arm64)
+    permissions:
+      contents: write
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: "./src-tauri -> target"
 
       - run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -46,3 +53,5 @@ jobs:
             1. 아래 **Planner_*_aarch64.dmg** 를 받아서 열고, Planner를 응용 프로그램 폴더로 끌어다 놓기
             2. 터미널에서 한 번 실행 (서명 안 된 앱이라 "손상됨" 경고 방지): `xattr -cr /Applications/Planner.app`
             3. 이전 버전이 켜져 있으면 메뉴바 아이콘 우클릭 → 종료 후 새로 열기
+
+            데이터는 앱과 별도로 저장돼서 업데이트해도 그대로 유지돼요.

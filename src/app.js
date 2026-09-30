@@ -305,8 +305,6 @@ function parseQuick(input, now = new Date()) {
   return out;
 }
 
-window.__planner = { parseQuick };   // 테스트용
-
 function describeQuick(q) {
   if (!q.title) return "제목을 입력하세요";
   const when = q.kind === "recurring" ? recLabel(q) : q.endDate ? `${fmtDate(q.date)} ~ ${fmtDate(q.endDate)}` : fmtDate(q.date);
