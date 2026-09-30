@@ -264,8 +264,85 @@ fn show_main(app: AppHandle) {
     show_main_window(&app);
 }
 
+// ───────────── 위젯 (고정된 미니 창) ─────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct Widget {
+    pinned: bool,
+    x: Option<i32>,
+    y: Option<i32>,
+    w: Option<u32>,
+    h: Option<u32>,
+}
+struct WidgetState(Mutex<Widget>);
+
+fn widget_path(app: &AppHandle) -> Option<PathBuf> {
+    app_dir(app).ok().map(|d| d.join("widget.json"))
+}
+fn load_widget(app: &AppHandle) -> Widget {
+    widget_path(app)
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+fn save_widget(app: &AppHandle, w: &Widget) {
+    if let (Some(p), Ok(s)) = (widget_path(app), serde_json::to_string(w)) {
+        let _ = fs::write(p, s);
+    }
+}
+fn widget_pinned(app: &AppHandle) -> bool {
+    app.try_state::<WidgetState>().map_or(false, |s| s.0.lock().unwrap().pinned)
+}
+
+/// 고정 상태에 맞게 미니 창 설정 (위치·크기 복원, 모든 데스크탑에 표시)
+fn apply_widget(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("mini") else { return };
+    let st = match app.try_state::<WidgetState>() {
+        Some(s) => s.0.lock().unwrap().clone(),
+        None => return,
+    };
+    let _ = win.set_resizable(st.pinned);
+    let _ = win.set_visible_on_all_workspaces(st.pinned);
+    if st.pinned {
+        if let (Some(w), Some(h)) = (st.w, st.h) {
+            let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+        }
+        match (st.x, st.y) {
+            (Some(x), Some(y)) => { let _ = win.set_position(tauri::PhysicalPosition::new(x, y)); }
+            _ => { let _ = win.move_window(Position::TopRight); }
+        }
+        let _ = win.show();
+    }
+}
+
+#[tauri::command]
+fn get_widget(app: AppHandle) -> bool {
+    widget_pinned(&app)
+}
+
+#[tauri::command]
+fn set_widget(app: AppHandle, pinned: bool) -> bool {
+    if let Some(state) = app.try_state::<WidgetState>() {
+        let mut st = state.0.lock().unwrap();
+        st.pinned = pinned;
+        save_widget(&app, &st);
+    }
+    apply_widget(&app);
+    if !pinned {
+        if let Some(w) = app.get_webview_window("mini") {
+            let _ = w.hide();
+        }
+    }
+    pinned
+}
+
 fn toggle_mini(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("mini") {
+        if widget_pinned(app) {
+            // 위젯 모드: 위치는 그대로 두고 보이기/숨기기만
+            if w.is_visible().unwrap_or(false) { let _ = w.hide(); } else { let _ = w.show(); }
+            return;
+        }
         let just_hidden = MINI_HIDDEN_AT
             .lock()
             .unwrap()
@@ -298,6 +375,8 @@ fn main() {
             get_storage,
             set_storage,
             set_theme,
+            get_widget,
+            set_widget,
             show_main
         ])
         .setup(|app| {
@@ -362,6 +441,10 @@ fn main() {
 
             start_reminder_loop(app.handle().clone());
 
+            // 위젯이 고정돼 있으면 저장된 자리에 바로 띄움 (로그인 자동 실행 포함)
+            app.manage(WidgetState(Mutex::new(load_widget(app.handle()))));
+            apply_widget(app.handle());
+
             // 일반 실행이면 메인 창 표시, 로그인 자동 실행(--hidden)이면 메뉴바에만
             if !std::env::args().any(|a| a == "--hidden") {
                 show_main_window(app.handle());
@@ -374,10 +457,27 @@ fn main() {
                 api.prevent_close();
                 let _ = window.hide();
             }
-            // 미니 창은 포커스를 잃으면 숨김
-            WindowEvent::Focused(false) if window.label() == "mini" => {
+            // 미니 창은 포커스를 잃으면 숨김 (위젯으로 고정했으면 유지)
+            WindowEvent::Focused(false) if window.label() == "mini" && !widget_pinned(window.app_handle()) => {
                 *MINI_HIDDEN_AT.lock().unwrap() = Some(Instant::now());
                 let _ = window.hide();
+            }
+            // 위젯 위치·크기 기억
+            WindowEvent::Moved(pos) if window.label() == "mini" && widget_pinned(window.app_handle()) => {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<WidgetState>() {
+                    let mut st = state.0.lock().unwrap();
+                    st.x = Some(pos.x); st.y = Some(pos.y);
+                    save_widget(app, &st);
+                }
+            }
+            WindowEvent::Resized(size) if window.label() == "mini" && widget_pinned(window.app_handle()) && size.width > 0 => {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<WidgetState>() {
+                    let mut st = state.0.lock().unwrap();
+                    st.w = Some(size.width); st.h = Some(size.height);
+                    save_widget(app, &st);
+                }
             }
             _ => {}
         })

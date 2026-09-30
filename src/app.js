@@ -68,7 +68,11 @@ const undoStack = [], redoStack = [];
 
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { saveTimer = null; store.save(); syncReminders(); }, 200);
+  saveTimer = setTimeout(async () => { saveTimer = null; await store.save(); syncReminders(); broadcast(); }, 200);
+}
+// 다른 창(메인 ↔ 위젯)에 변경 알림
+function broadcast() {
+  if (IN_TAURI && window.__TAURI__.event) window.__TAURI__.event.emit("data-changed", WINDOW_LABEL).catch(() => {});
 }
 function persist() {
   if (!ready) { showError("데이터를 아직 불러오지 못해서 저장하지 않았어요."); return; }
@@ -100,7 +104,7 @@ function handleEditCommand(cmd) {
   cmd === "redo" ? redo() : undo();
 }
 async function flush() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await store.save(); syncReminders(); }
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await store.save(); syncReminders(); broadcast(); }
 }
 
 // ═════════════════════════ 반복 규칙 ═════════════════════════
@@ -819,22 +823,37 @@ function renderYear(main, y) {
   }
 }
 
-// ── 메뉴바 미니 창
+// ── 메뉴바 미니 창 / 위젯
+let widgetPinned = false;
+function toggleWidget() {
+  if (!IN_TAURI) return;
+  invoke("set_widget", { pinned: !widgetPinned }).then((v) => {
+    widgetPinned = v;
+    document.body.classList.toggle("widget", v);
+    render();
+  }).catch((e) => showError(errText(e)));
+}
+if (IS_MINI && IN_TAURI) invoke("get_widget").then((v) => { widgetPinned = v; document.body.classList.toggle("widget", v); render(); }).catch(() => {});
+
 function renderMini() {
   const main = $("#week");
   main.className = "mini-view";
   const ds = todayStr(), tomorrow = ymd(addDays(new Date(), 1));
   const todayItems = itemsFor(ds), tomorrowItems = itemsFor(tomorrow);
-  const qi = el("input", { class: "quick-input", placeholder: "빠른 추가: 내일 3시 멘토링 @7호관" });
+  const qi = el("input", { class: "quick-input", placeholder: "빠른 추가" });
   const qp = el("div", { class: "quick-preview", hidden: true });
   attachQuick(qi, qp);
   const chips = ddayChips(3);
-  main.replaceChildren(
+  main.replaceChildren(...[
+    el("div", { class: "mini-head", "data-tauri-drag-region": true },
+      el("div", { "data-tauri-drag-region": true },
+        el("div", { class: "muted small", "data-tauri-drag-region": true }, "오늘"),
+        el("div", { class: "mini-date", "data-tauri-drag-region": true }, fmtDate(ds))),
+      el("div", { class: "mini-actions" },
+        el("button", { class: "icon-btn small" + (widgetPinned ? " on" : ""), title: widgetPinned ? "위젯 고정 해제" : "위젯으로 고정 (항상 위에 떠 있기)", onclick: toggleWidget }, "📌"),
+        el("button", { class: "icon-btn small", title: "플래너 열기", onclick: () => IN_TAURI && invoke("show_main") }, "↗"))),
     el("div", { class: "quick-wrap" }, qi, qp),
     chips.length ? el("div", { class: "dday-row" }, ...chips) : null,
-    el("div", { class: "mini-head" },
-      el("div", {}, el("div", { class: "muted small" }, "오늘"), el("div", { class: "mini-date" }, fmtDate(ds))),
-      el("button", { class: "btn small", onclick: () => IN_TAURI && invoke("show_main") }, "플래너 열기")),
     el("section", { class: "mini-sec", "data-date": ds },
       ...(todayItems.length ? todayItems.map(itemCard) : [el("div", { class: "muted small pad" }, "오늘 일정 없음")]),
       todoList(ds, { withCarry: true })),
@@ -843,7 +862,7 @@ function renderMini() {
       ...(tomorrowItems.length
         ? tomorrowItems.map((it) => el("div", { class: "mini-line", style: `--c:${it.color || COLORS[0]}` }, el("span", { class: "m-time" }, it.start || "종일"), it.title))
         : [el("div", { class: "muted small pad" }, "일정 없음")]))
-  );
+  ].filter(Boolean));
 }
 
 // ═════════════════════════ 편집 다이얼로그 ═════════════════════════
@@ -1577,6 +1596,8 @@ reload();
 
 // 다른 창(메뉴바 미니 창 ↔ 메인)에서 바뀐 내용 반영
 window.addEventListener("focus", reload);
+if (IN_TAURI && window.__TAURI__.event)
+  window.__TAURI__.event.listen("data-changed", (e) => { if (e.payload !== WINDOW_LABEL) reload(); });
 window.addEventListener("blur", flush);
 document.addEventListener("visibilitychange", () => (document.hidden ? flush() : reload()));
 
@@ -1585,7 +1606,7 @@ let lastToday = todayStr();
 setInterval(() => {
   const now = todayStr();
   if (now !== lastToday) { lastToday = now; render(); }
-  if (!IS_MINI) reload();
-}, 5 * 60 * 1000);
+  reload();
+}, IS_MINI ? 60 * 1000 : 5 * 60 * 1000);
 
 })();

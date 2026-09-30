@@ -449,3 +449,11 @@ body.mini .quick-preview { white-space: normal; }
 .quick-wrap.top { flex: 0 1 420px; min-width: 240px; }
 .subbar .dday-bar { padding: 0; }
 body.mini .subbar { display: none; }
+
+/* ───── 위젯 ───── */
+.mini-actions { display: flex; gap: 4px; }
+.icon-btn.small { width: 28px; height: 28px; padding: 0; font-size: 13px; }
+.icon-btn.on { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-color: var(--accent); }
+.mini-head[data-tauri-drag-region] { cursor: default; }
+body.widget .mini-head { cursor: grab; }
+body.widget .mini-view { padding-top: 12px; }
