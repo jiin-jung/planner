@@ -494,10 +494,13 @@ try { deckOpen = localStorage.getItem("planner-deck") !== "0"; } catch {}
 
 function renderDeck() {
   const deck = $("#deck");
-  const show = deckOpen && view !== "year";
-  deck.hidden = !show;
-  $("#toggleDeck").classList.toggle("on", deckOpen);
-  if (!show) return;
+  deck.hidden = view === "year";
+  deck.classList.toggle("collapsed", !deckOpen);
+  if (view === "year") return;
+  if (!deckOpen) {   // 접힌 상태: 왼쪽에 얇은 탭만
+    deck.replaceChildren(el("button", { class: "deck-tab", title: "Templates 열기 (c)", onclick: toggleDeck }, "›"));
+    return;
+  }
   const cardEl = (kind, ref, sub) => draggable(
     el("div", { class: "deck-card", style: `--c:${ref.color || COLORS[0]}`,
       onclick: () => (kind === "card" ? fillForm({ kind: "card", ref, date: null }) : fillForm({ kind: "recurring", ref, date: null })) },
@@ -507,8 +510,11 @@ function renderDeck() {
     { kind, ref, date: null });
   const recs = activeSeries();
   deck.replaceChildren(
-    el("div", { class: "deck-head" }, el("strong", {}, "Templates"),
-      el("button", { class: "btn small", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+ Template")),
+    el("div", { class: "deck-head" },
+      el("span", { class: "deck-title-row" },
+        el("button", { class: "deck-collapse", title: "접기 (c)", onclick: toggleDeck }, "‹"),
+        el("strong", {}, "Templates")),
+      el("button", { class: "icon-btn small", title: "새 Template", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+")),
     el("div", { class: "deck-hint" }, "자주 쓰는 일정 · 날짜로 끌어 놓기"),
     ...(data.cards.length
       ? data.cards.map((c) => cardEl("card", c, timeRange(c.start, c.end) + (c.place ? ` · ${c.place}` : "")))
@@ -520,7 +526,10 @@ function renderDeck() {
           el("div", { class: "deck-title" }, "헬스"),
           el("div", { class: "deck-sub" }, "19:00 – 20:00 · 예시"),
           el("div", { class: "deck-sub" }, "+ 눌러서 만들기"))]),
-    recs.length ? el("div", { class: "deck-head sub" }, el("strong", {}, "Routines")) : null,
+    el("div", { class: "deck-head sub" },
+      el("button", { class: "deck-link", title: "Routines 목록 · 회차 Notes", onclick: () => { renderRecurringList(); recDlg.showModal(); } },
+        el("strong", {}, "Routines"), el("span", { class: "muted" }, " ›"))),
+    recs.length ? null : el("div", { class: "deck-hint" }, "+ Routine 으로 반복 일정 추가"),
     ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)));
 }
 
@@ -1176,7 +1185,6 @@ function renderRecurringList() {
           el("button", { class: "btn small", onclick: (e) => { e.stopPropagation(); recDlg.close(); openMinutes(r); } }, "Notes")))
     : [el("li", { class: "empty" }, "아직 Routine이 없어요")]));
 }
-$("#manageRecurring").onclick = () => { renderRecurringList(); recDlg.showModal(); };
 $("#closeRecurring").onclick = () => recDlg.close();
 
 // ═════════════════════════ 검색 ═════════════════════════
@@ -1633,11 +1641,11 @@ document.querySelectorAll("#weekMode button").forEach((b) => (b.onclick = () => 
 }));
 $("#addEvent").onclick = () => openNew("event", null);
 if (!IS_MINI) attachQuick($("#quickInput"), $("#quickPreview"));
-$("#toggleDeck").onclick = () => {
+function toggleDeck() {
   deckOpen = !deckOpen;
   try { localStorage.setItem("planner-deck", deckOpen ? "1" : "0"); } catch {}
   render();
-};
+}
 $("#addRecurring").onclick = () => openNew("recurring", null);
 
 // 실행 취소: 앱에서는 메뉴(⌘Z)가 이벤트로 알려 줌, 브라우저에서는 키 입력으로
@@ -1666,7 +1674,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "w") { if (view === "week") { weekMode = weekMode === "grid" ? "list" : "grid"; try { localStorage.setItem("planner-weekmode", weekMode); } catch {} render(); } else goTo("week"); }
   else if (k === "m") goTo("month");
   else if (k === "y") goTo("year");
-  else if (k === "c") $("#toggleDeck").click();
+  else if (k === "c") toggleDeck();
   else if (k === "v") openReview();
   else if (k === "k") { e.preventDefault(); $("#quickInput").focus(); }
   else if (k === "/") { e.preventDefault(); openSearch(); }

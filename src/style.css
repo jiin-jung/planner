@@ -505,3 +505,19 @@ dialog.guide { width: min(520px, calc(100vw - 32px)); }
 .g-action { width: 100%; }
 .g-action.done { color: #16a37a; border-color: #16a37a; }
 @media (prefers-reduced-motion: reduce) { .g-fly { animation: none; } }
+
+/* ───── 사이드바 접기 · Routines 링크 · Weekly Review ───── */
+.deck.collapsed { width: 28px; padding: 0 0 20px 10px; }
+.deck-tab {
+  font: inherit; font-size: 16px; color: var(--muted); cursor: pointer;
+  width: 18px; height: 60px; border: 1px solid var(--border); border-left: none;
+  border-radius: 0 8px 8px 0; background: var(--surface); padding: 0; margin-top: 2px;
+}
+.deck-tab:hover { color: var(--accent); }
+.deck-title-row { display: flex; align-items: center; gap: 4px; }
+.deck-collapse { font: inherit; font-size: 15px; border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 4px 0 0; }
+.deck-collapse:hover { color: var(--accent); }
+.deck-link { font: inherit; border: none; background: none; color: var(--text); cursor: pointer; padding: 0; }
+.deck-link:hover strong { color: var(--accent); }
+.review-link { margin-left: auto; color: var(--muted); }
+.review-link:hover { color: var(--accent); }
