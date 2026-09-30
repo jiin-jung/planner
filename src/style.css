@@ -457,3 +457,51 @@ body.mini .subbar { display: none; }
 .mini-head[data-tauri-drag-region] { cursor: default; }
 body.widget .mini-head { cursor: grab; }
 body.widget .mini-view { padding-top: 12px; }
+
+/* 예시 템플릿 (비어 있을 때) */
+.deck-card.ghost { font: inherit; text-align: left; width: 100%; opacity: .55; border-style: dashed; cursor: pointer; }
+.deck-card.ghost:hover { opacity: .9; }
+
+/* ───── 처음 실행 가이드 ───── */
+dialog.guide { width: min(520px, calc(100vw - 32px)); }
+.guide-body { padding: 24px 24px 18px; display: flex; flex-direction: column; gap: 18px; }
+.guide-slide { display: flex; flex-direction: column; gap: 8px; min-height: 330px; }
+.guide-slide h2 { font-size: 19px; letter-spacing: -.01em; margin-top: 6px; }
+.g-text { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0; }
+.g-visual {
+  height: 200px; border-radius: 12px; background: var(--surface-2);
+  display: grid; place-items: center; padding: 16px; overflow: hidden;
+}
+.guide-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guide-nav { display: flex; gap: 6px; }
+.guide-dots { display: flex; gap: 6px; }
+.g-dot { width: 7px; height: 7px; padding: 0; border-radius: 999px; border: none; background: var(--border); cursor: pointer; }
+.g-dot.on { background: var(--accent); width: 18px; }
+
+.g-chip {
+  font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+  background: color-mix(in srgb, var(--c) 16%, var(--surface)); border-left: 3px solid var(--c);
+}
+.g-quick { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.g-input { background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.g-input kbd { font: inherit; font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
+.g-preview { background: var(--surface); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--muted); }
+.g-week { width: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; height: 100%; }
+.g-day { background: var(--surface); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.g-day .g-chip { font-size: 10.5px; padding: 3px 5px; overflow: hidden; text-overflow: ellipsis; }
+.g-drag { width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1.3fr; gap: 14px; }
+.g-deck, .g-target { background: var(--surface); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+.g-target { border: 1.5px dashed var(--accent); }
+.g-fly { animation: g-fly 2.6s ease-in-out infinite; }
+@keyframes g-fly {
+  0%, 15% { transform: translateX(-190px); opacity: .0; }
+  25% { opacity: 1; }
+  60%, 100% { transform: translateX(0); opacity: 1; }
+}
+.g-card { width: 240px; background: color-mix(in srgb, var(--c) 12%, var(--surface)); border-left: 3px solid var(--c); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.g-check.done { color: var(--muted); text-decoration: line-through; }
+.g-memo { margin-top: 4px; font-size: 11.5px; color: var(--accent); }
+.g-actions { display: flex; flex-direction: column; gap: 8px; width: 240px; }
+.g-action { width: 100%; }
+.g-action.done { color: #16a37a; border-color: #16a37a; }
+@media (prefers-reduced-motion: reduce) { .g-fly { animation: none; } }

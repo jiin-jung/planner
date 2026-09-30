@@ -507,11 +507,19 @@ function renderDeck() {
     { kind, ref, date: null });
   const recs = activeSeries();
   deck.replaceChildren(
-    el("div", { class: "deck-head" }, el("strong", {}, "Cards"),
-      el("button", { class: "btn small", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+ Card")),
+    el("div", { class: "deck-head" }, el("strong", {}, "Templates"),
+      el("button", { class: "btn small", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+ Template")),
+    el("div", { class: "deck-hint" }, "자주 쓰는 일정 · 날짜로 끌어 놓기"),
     ...(data.cards.length
       ? data.cards.map((c) => cardEl("card", c, timeRange(c.start, c.end) + (c.place ? ` · ${c.place}` : "")))
-      : [el("div", { class: "deck-empty" }, "Card를 날짜로 끌어다 놓으세요")]),
+      : [el("button", { class: "deck-card ghost", style: `--c:${COLORS[1]}`, title: "눌러서 예시 Template 만들기", onclick: () => {
+          fillForm({ kind: "card", ref: null, date: null });
+          form.title.value = "헬스"; setTime(form.start, "19:00"); setTime(form.end, "20:00"); endTouched = true;
+          pickedColor = COLORS[1]; renderColors();
+        } },
+          el("div", { class: "deck-title" }, "헬스"),
+          el("div", { class: "deck-sub" }, "19:00 – 20:00 · 예시"),
+          el("div", { class: "deck-sub" }, "+ 눌러서 만들기"))]),
     recs.length ? el("div", { class: "deck-head sub" }, el("strong", {}, "Routines")) : null,
     ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)));
 }
@@ -987,7 +995,7 @@ function fillForm({ kind, ref, date }) {
   const isRec = kind === "recurring", isCard = kind === "card";
   const isOcc = isRec && ref && date;          // 정기 회의의 특정 회차
   const v = ref || {};
-  $("#dialogTitle").textContent = (ref ? "" : "New ") + (isCard ? "Card" : isRec ? (isOcc ? `Routine · ${fmtDate(date)}` : "Routine") : "Event");
+  $("#dialogTitle").textContent = (ref ? "" : "New ") + (isCard ? "Template" : isRec ? (isOcc ? `Routine · ${fmtDate(date)}` : "Routine") : "Event");
   $("#recurringFields").hidden = !isRec;
   $("#eventFields").hidden = isRec || isCard;
 
@@ -1137,7 +1145,7 @@ $("#saveAsCard").onclick = () => {
   const isEvent = editing.kind === "event";
   data.cards.push({ id: uid(), ...base, note: isEvent ? form.occNote.value.trim() : "", prep: editChecks.map((c) => c.text) });
   persist(); renderDeck();
-  toast(`'${base.title}' Card를 만들었어요. 왼쪽 Cards에서 날짜로 끌어다 놓으세요.`);
+  toast(`'${base.title}' Template을 만들었어요. 왼쪽 Templates에서 날짜로 끌어 놓으세요.`);
 };
 
 $("#deleteItem").onclick = () => {
@@ -1435,6 +1443,101 @@ function applyTheme() {
   if (IN_TAURI && !IS_MINI) invoke("set_theme", { theme: t }).catch(() => {});
 }
 
+// ═════════════════════════ 처음 실행 가이드 ═════════════════════════
+const guideDlg = $("#guideDialog");
+let guideStep = 0;
+
+const demoChip = (text, color = COLORS[0], extra = "") =>
+  el("div", { class: "g-chip " + extra, style: `--c:${color}` }, text);
+
+function guideSlides() {
+  const sample = "내일 3시 헬스 @학교";
+  const actionBtn = (label, run) => {
+    const b = el("button", { type: "button", class: "btn g-action" }, label);
+    b.onclick = async () => {
+      try { await run(); b.classList.add("done"); b.textContent = "✓ " + label; }
+      catch (e) { showError(errText(e)); }
+    };
+    if (!IN_TAURI) { b.disabled = true; b.title = "앱에서만 동작해요"; }
+    return b;
+  };
+  return [
+    {
+      title: "Planner에 오신 걸 환영해요",
+      text: "개인 일정을 가볍게 관리하는 맥 플래너예요. 가장 빠른 방법은 한 줄로 입력하는 거예요.",
+      visual: el("div", { class: "g-quick" },
+        el("div", { class: "g-input" }, el("kbd", {}, "⌘K"), " ", sample),
+        el("div", { class: "g-preview" }, "↵ " + describeQuick(parseQuick(sample)))),
+    },
+    {
+      title: "반복되는 일정은 Routine",
+      text: "+ Routine 에서 매주 · 격주 · 매월 n번째를 고를 수 있어요. 회차마다 메모를 남기고 ↻ 에서 모아볼 수 있어요.",
+      visual: el("div", { class: "g-week" },
+        ...["월", "화", "수", "목", "금"].map((d, i) =>
+          el("div", { class: "g-day" }, el("span", { class: "muted small" }, d),
+            i === 2 ? demoChip("19:00 스터디") : null,
+            i === 0 || i === 3 ? demoChip("07:00 헬스", COLORS[1]) : null))),
+    },
+    {
+      title: "자주 쓰는 일정은 Template",
+      text: "왼쪽 Templates에 저장해 두고, 원하는 날짜로 끌어 놓으면 바로 일정이 생겨요. 기존 일정에서 Save as Template으로도 만들 수 있어요.",
+      visual: el("div", { class: "g-drag" },
+        el("div", { class: "g-deck" }, el("div", { class: "muted small" }, "Templates"), demoChip("헬스 19:00", COLORS[1])),
+        el("div", { class: "g-target" }, el("span", { class: "muted small" }, "목"), demoChip("헬스 19:00", COLORS[1], "g-fly"))),
+    },
+    {
+      title: "준비할 것과 할 일",
+      text: "일정마다 Prep 체크리스트를 달 수 있어요. 메모에 - [ ] 로 쓰면 To-do로 자동으로 들어가요.",
+      visual: el("div", { class: "g-card", style: `--c:${COLORS[0]}` },
+        el("div", { class: "muted small" }, "14:00 – 15:00"),
+        el("strong", {}, "캡스톤 발표"),
+        el("div", { class: "g-check done" }, "☑ 슬라이드"),
+        el("div", { class: "g-check" }, "☐ 노트북 충전"),
+        el("div", { class: "g-memo" }, "- [ ] 발표 피드백 정리  →  To-do")),
+    },
+    {
+      title: "마지막으로 설정해요",
+      text: "필요한 것만 눌러 두세요. 나중에 ⚙︎ 설정에서 언제든 바꿀 수 있어요.",
+      visual: el("div", { class: "g-actions" },
+        actionBtn("알림 허용", () => invoke("test_notification")),
+        actionBtn("로그인 시 자동 실행", () => invoke("set_autostart", { enabled: true })),
+        actionBtn("위젯 띄우기 📌", () => invoke("set_widget", { pinned: true }))),
+    },
+  ];
+}
+
+function renderGuide() {
+  const slides = guideSlides();
+  const s = slides[guideStep];
+  $("#guideSlide").replaceChildren(
+    el("div", { class: "g-visual" }, s.visual),
+    el("h2", {}, s.title),
+    el("p", { class: "g-text" }, s.text));
+  $("#guideDots").replaceChildren(...slides.map((_, i) =>
+    el("button", { type: "button", class: "g-dot" + (i === guideStep ? " on" : ""), title: `${i + 1}/${slides.length}`, onclick: () => { guideStep = i; renderGuide(); } })));
+  $("#guidePrev").hidden = guideStep === 0;
+  const last = guideStep === slides.length - 1;
+  $("#guideNext").textContent = last ? "시작하기" : "다음";
+  $("#guideSkip").style.visibility = last ? "hidden" : "visible";
+}
+function openGuide() { guideStep = 0; renderGuide(); if (!guideDlg.open) guideDlg.showModal(); $("#guideNext").focus(); }
+function finishGuide() {
+  if (guideDlg.open) guideDlg.close();
+  if (!data.settings.onboarded) { data.settings.onboarded = true; persist(); }
+}
+$("#guideNext").onclick = () => {
+  if (guideStep >= guideSlides().length - 1) return finishGuide();
+  guideStep++; renderGuide();
+};
+$("#guidePrev").onclick = () => { if (guideStep > 0) { guideStep--; renderGuide(); } };
+$("#guideSkip").onclick = finishGuide;
+guideDlg.addEventListener("cancel", (e) => { e.preventDefault(); finishGuide(); });
+guideDlg.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") $("#guideNext").click();
+  else if (e.key === "ArrowLeft") $("#guidePrev").click();
+});
+$("#openGuide").onclick = () => { setDlg.close(); openGuide(); };
+
 // ═════════════════════════ 설정 ═════════════════════════
 const setDlg = $("#settingsDialog");
 function renderStorage(info) {
@@ -1587,7 +1690,10 @@ async function reload() {
     const changed = raw !== lastLoaded || !ready;
     lastLoaded = raw;
     if (changed && raw !== JSON.stringify(data)) { data = normalize(loaded || {}); render(); }
-    if (!ready) { ready = true; render(); }
+    if (!ready) {
+      ready = true; render();
+      if (!IS_MINI && !data.settings.onboarded) setTimeout(openGuide, 400);
+    }
     applyTheme();
     if (changed) snapshot = JSON.stringify(data);
     syncReminders();

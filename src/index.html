@@ -24,7 +24,7 @@
         <button data-mode="grid">Timeline</button>
     </div>
     <div class="actions">
-      <button id="toggleDeck" class="icon-btn toggle" title="Cards (c)">▤</button>
+      <button id="toggleDeck" class="icon-btn toggle" title="Templates (c)">▤</button>
       <button id="openSearch" class="icon-btn" title="검색 (⌘F 또는 /)">⌕</button>
       <button id="openReview" class="icon-btn" title="Weekly Review (v)">◔</button>
       <button id="openSettings" class="icon-btn" title="설정 · 백업">⚙︎</button>
@@ -134,7 +134,7 @@
 
       <div class="dialog-actions">
         <button type="button" id="deleteItem" class="btn danger">삭제</button>
-        <button type="button" id="saveAsCard" class="btn ghost small" title="Card로 저장">Save as Card</button>
+        <button type="button" id="saveAsCard" class="btn ghost small" title="Template으로 저장">Save as Template</button>
         <button type="button" id="openMinutesFromItem" class="btn ghost small" title="회차별 메모 모아보기">Notes</button>
         <span class="spacer"></span>
         <button type="button" id="cancelItem" class="btn ghost">취소</button>
@@ -198,6 +198,21 @@
     </div>
   </dialog>
 
+  <!-- 처음 실행 가이드 -->
+  <dialog id="guideDialog" class="guide">
+    <div class="guide-body">
+      <div id="guideSlide" class="guide-slide"></div>
+      <div class="guide-foot">
+        <button type="button" id="guideSkip" class="btn ghost small">건너뛰기</button>
+        <div id="guideDots" class="guide-dots"></div>
+        <div class="guide-nav">
+          <button type="button" id="guidePrev" class="btn small">이전</button>
+          <button type="button" id="guideNext" class="btn primary small">다음</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- 설정 -->
   <dialog id="settingsDialog">
     <div class="dialog-body">
@@ -234,6 +249,9 @@
       <h3>데이터 위치</h3>
       <div id="storageBox" class="stack"></div>
       <p class="muted small">iCloud Drive에 두면 다른 맥이나 나중에 만들 아이폰 앱과 같은 데이터를 써요. 자동 백업은 항상 이 맥에 보관돼요.</p>
+
+      <h3>도움말</h3>
+      <button type="button" id="openGuide" class="btn small">가이드 다시 보기</button>
 
       <h3>실행</h3>
       <label class="check"><input type="checkbox" id="setAutostart" /> 맥에 로그인하면 메뉴바에서 자동으로 켜기</label>
