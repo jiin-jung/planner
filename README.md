@@ -16,14 +16,42 @@
 
 1. [Releases](https://github.com/jiin-jung/planner/releases/latest)에서 `Planner_x.y.z_aarch64.dmg`를 다운로드합니다.
 2. 파일을 열고 **Planner**를 응용 프로그램 폴더로 드래그합니다.
-3. 응용 프로그램에서 Planner를 실행합니다. 유료 Apple Developer ID로 서명되지 않은 앱이라 macOS가 처음 실행을 차단합니다.
-4. **시스템 설정 → 개인정보 보호 및 보안**으로 이동한 다음, 아래로 스크롤해 Planner 관련 메시지 옆의 **그래도 열기**를 누릅니다. 최근 macOS에서는 우클릭 후 열기 방식이 동작하지 않습니다.
+3. 응용 프로그램에서 **Planner**를 실행합니다. Apple Developer ID로 서명되지 않은 앱이라 처음 실행할 때 차단 안내가 나타날 수 있습니다.
 
-   또는 터미널에서 다음 명령을 실행합니다.
+### 처음 실행이 차단될 때
 
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/Planner.app
-   ```
+아래 화면은 macOS에서 촬영했습니다. macOS 버전에 따라 문구와 화면 배치가 다를 수 있습니다.
+
+1. **‘Planner’을(를) 열지 않음** 안내가 뜨면 **완료**를 누릅니다.
+
+   <img src="docs/images/install/01-blocked.png" width="380" alt="Planner 실행 차단 안내에서 완료 버튼 선택" />
+
+2. **시스템 설정 → 개인정보 보호 및 보안**으로 이동하고, 아래로 스크롤해 **보안** 항목을 찾습니다. Planner를 차단했다는 메시지 옆의 **그래도 열기**를 누릅니다.
+
+   <img src="docs/images/install/03-security.png" width="680" alt="개인정보 보호 및 보안의 Planner 그래도 열기 버튼" />
+
+3. **‘Planner’을(를) 열겠습니까?** 확인 창에서 **그래도 열기**를 누릅니다. Mac 인증을 요청하면 화면 안내를 따릅니다.
+
+   <img src="docs/images/install/04-confirm-open.png" width="380" alt="Planner 실행 확인 창의 그래도 열기 버튼" />
+
+4. Planner가 열리면 설치가 완료됩니다.
+
+   <img src="docs/images/install/05-planner.png" width="900" alt="Planner 실행 완료 화면, 개인 일정은 흐림 처리" />
+
+<details>
+<summary>Apple 도움말 화면 보기</summary>
+
+<img src="docs/images/install/02-apple-help.png" width="800" alt="확인되지 않은 앱을 여는 방법에 관한 Apple 도움말" />
+
+</details>
+
+이 저장소의 Releases에서 받은 파일인지 확인한 뒤 진행하세요.
+
+터미널을 사용하는 경우 다음 명령으로도 실행 차단을 해제할 수 있습니다.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Planner.app
+```
 
 업데이트할 때도 같은 방법으로 덮어쓰면 되고, 데이터는 그대로 유지됩니다.
 
