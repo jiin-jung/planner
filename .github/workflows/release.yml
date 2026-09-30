@@ -18,7 +18,9 @@ jobs:
   macos:
     runs-on: macos-latest   # Apple Silicon (arm64)
     permissions:
-      contents: write
+      contents: write      # 릴리스 업로드
+      id-token: write      # 빌드 출처 증명(attestation) 서명
+      attestations: write
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -55,3 +57,18 @@ jobs:
             3. 이전 버전이 켜져 있으면 메뉴바 아이콘 우클릭 → 종료 후 새로 열기
 
             데이터는 앱과 별도로 저장돼서 업데이트해도 그대로 유지돼요.
+
+      - name: SHA256 체크섬 업로드
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: src-tauri/target/release/bundle/dmg
+        run: |
+          VERSION=$(node -p "require('../../../../tauri.conf.json').version")
+          shasum -a 256 *.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "v$VERSION" SHA256SUMS.txt --clobber -R "$GITHUB_REPOSITORY"
+
+      - name: 빌드 출처 증명 (이 저장소의 Actions에서 빌드됐음을 서명)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: src-tauri/target/release/bundle/dmg/*.dmg
