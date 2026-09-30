@@ -185,6 +185,14 @@ const el = (tag, attrs = {}, ...children) => {
   return n;
 };
 
+// 빈 값(null/false)이 "null" 글자로 찍히지 않도록 전역에서 걸러냄
+for (const proto of [Element.prototype, DocumentFragment.prototype]) {
+  for (const fn of ["replaceChildren", "append", "prepend"]) {
+    const orig = proto[fn];
+    proto[fn] = function (...kids) { return orig.apply(this, kids.filter((k) => k != null && k !== false)); };
+  }
+}
+
 function showError(msg) {
   let bar = document.getElementById("errorBar");
   if (!bar) {
@@ -302,7 +310,7 @@ window.__planner = { parseQuick };   // 테스트용
 function describeQuick(q) {
   if (!q.title) return "제목을 입력하세요";
   const when = q.kind === "recurring" ? recLabel(q) : q.endDate ? `${fmtDate(q.date)} ~ ${fmtDate(q.endDate)}` : fmtDate(q.date);
-  return [q.deadline ? "⚑ 마감" : null, when, q.start ? timeRange(q.start, q.end) : "종일", q.title, q.place ? `@${q.place}` : null].filter(Boolean).join(" · ");
+  return [q.deadline ? "⚑ Due" : null, when, q.start ? timeRange(q.start, q.end) : "종일", q.title, q.place ? `@${q.place}` : null].filter(Boolean).join(" · ");
 }
 
 function createFromQuick(q) {
@@ -497,16 +505,16 @@ function renderDeck() {
       onclick: () => (kind === "card" ? fillForm({ kind: "card", ref, date: null }) : fillForm({ kind: "recurring", ref, date: null })) },
       el("div", { class: "deck-title" }, ref.title),
       el("div", { class: "deck-sub" }, sub),
-      ref.prep?.length ? el("div", { class: "deck-sub" }, `준비 ${ref.prep.length}개`) : null),
+      ref.prep?.length ? el("div", { class: "deck-sub" }, `Prep ${ref.prep.length}`) : null),
     { kind, ref, date: null });
   const recs = activeSeries();
   deck.replaceChildren(
-    el("div", { class: "deck-head" }, el("strong", {}, "카드"),
-      el("button", { class: "btn small", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+ 카드")),
+    el("div", { class: "deck-head" }, el("strong", {}, "Cards"),
+      el("button", { class: "btn small", onclick: () => fillForm({ kind: "card", ref: null, date: null }) }, "+ Card")),
     ...(data.cards.length
       ? data.cards.map((c) => cardEl("card", c, timeRange(c.start, c.end) + (c.place ? ` · ${c.place}` : "")))
-      : [el("div", { class: "deck-empty" }, "카드를 날짜로 끌어다 놓으세요")]),
-    recs.length ? el("div", { class: "deck-head sub" }, el("strong", {}, "정기 회의")) : null,
+      : [el("div", { class: "deck-empty" }, "Card를 날짜로 끌어다 놓으세요")]),
+    recs.length ? el("div", { class: "deck-head sub" }, el("strong", {}, "Routines")) : null,
     ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)));
 }
 
@@ -514,7 +522,7 @@ function renderDday() {
   const bar = $("#ddayBar");
   const chips = ddayChips();
   bar.hidden = !chips.length;
-  bar.replaceChildren(el("span", { class: "muted small" }, "다가오는 마감"), ...chips);
+  bar.replaceChildren(el("span", { class: "muted small" }, "Due"), ...chips);
 }
 
 function render() {
@@ -566,7 +574,7 @@ function itemCard(it) {
         ? el("div", { class: "item-meta" },
             it.deadline ? el("span", { class: "badge dl" }, `⚑ ${dday(it.date)}`) : null,
             it.kind === "recurring" ? el("span", { class: "badge" }, recBadge(it.ref)) : null,
-            checks.length ? el("span", { class: "badge" + (doneN === checks.length ? " ok" : "") }, `준비 ${doneN}/${checks.length}`) : null,
+            checks.length ? el("span", { class: "badge" + (doneN === checks.length ? " ok" : "") }, `Prep ${doneN}/${checks.length}`) : null,
             it.place ? el("span", {}, it.place) : null)
         : null,
       checks.length && doneN < checks.length
@@ -590,7 +598,7 @@ function todoList(ds, { withCarry = false } = {}) {
   if (withCarry) {
     const overdue = data.todos.filter((t) => !t.done && t.date < ds);
     if (overdue.length)
-      box.append(el("button", { class: "carry", onclick: () => carryOver(ds) }, `↪ 밀린 할 일 ${overdue.length}개 가져오기`));
+      box.append(el("button", { class: "carry", onclick: () => carryOver(ds) }, `↪ 밀린 To-do ${overdue.length}개 가져오기`));
   }
   for (const t of data.todos.filter((t) => t.date === ds)) {
     const cb = el("input", { type: "checkbox" });
@@ -601,7 +609,7 @@ function todoList(ds, { withCarry = false } = {}) {
         el("button", { class: "x", title: "삭제", onclick: () => { data.todos = data.todos.filter((x) => x !== t); persist(); render(); toast("삭제됨 · ⌘Z"); } }, "×")),
       { kind: "todo", ref: t, date: ds }));
   }
-  const input = el("input", { class: "todo-input", placeholder: "+ 할 일" });
+  const input = el("input", { class: "todo-input", placeholder: "+ To-do" });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.isComposing && input.value.trim()) {
       data.todos.push({ id: uid(), date: ds, text: input.value.trim(), done: false });
@@ -701,7 +709,7 @@ function renderWeekGrid(main) {
         el("div", { class: "wg-btime" }, timeRange(it.start, it.end)),
         el("div", { class: "wg-btitle" }, it.deadline ? "⚑ " : "", it.title),
         it.place ? el("div", { class: "wg-bmeta" }, it.place) : null,
-        it.checks?.length ? el("div", { class: "wg-bmeta" }, `준비 ${it.checks.filter((c) => c.done).length}/${it.checks.length}`) : null);
+        it.checks?.length ? el("div", { class: "wg-bmeta" }, `Prep ${it.checks.filter((c) => c.done).length}/${it.checks.length}`) : null);
       draggable(block, { kind: it.kind, ref: it.ref, date: ds });
       // 잡은 위치만큼 보정 (블록 윗부분 기준으로 시각 계산)
       block.addEventListener("dragstart", (e) => {
@@ -847,7 +855,7 @@ function renderMini() {
   main.replaceChildren(...[
     el("div", { class: "mini-head", "data-tauri-drag-region": true },
       el("div", { "data-tauri-drag-region": true },
-        el("div", { class: "muted small", "data-tauri-drag-region": true }, "오늘"),
+        el("div", { class: "muted small", "data-tauri-drag-region": true }, "Today"),
         el("div", { class: "mini-date", "data-tauri-drag-region": true }, fmtDate(ds))),
       el("div", { class: "mini-actions" },
         el("button", { class: "icon-btn small" + (widgetPinned ? " on" : ""), title: widgetPinned ? "위젯 고정 해제" : "위젯으로 고정 (항상 위에 떠 있기)", onclick: toggleWidget }, "📌"),
@@ -858,7 +866,7 @@ function renderMini() {
       ...(todayItems.length ? todayItems.map(itemCard) : [el("div", { class: "muted small pad" }, "오늘 일정 없음")]),
       todoList(ds, { withCarry: true })),
     el("section", { class: "mini-sec" },
-      el("div", { class: "muted small" }, `내일 · ${fmtDate(tomorrow)}`),
+      el("div", { class: "muted small" }, `Tomorrow · ${fmtDate(tomorrow)}`),
       ...(tomorrowItems.length
         ? tomorrowItems.map((it) => el("div", { class: "mini-line", style: `--c:${it.color || COLORS[0]}` }, el("span", { class: "m-time" }, it.start || "종일"), it.title))
         : [el("div", { class: "muted small pad" }, "일정 없음")]))
@@ -981,7 +989,7 @@ function fillForm({ kind, ref, date }) {
   const isRec = kind === "recurring", isCard = kind === "card";
   const isOcc = isRec && ref && date;          // 정기 회의의 특정 회차
   const v = ref || {};
-  $("#dialogTitle").textContent = (ref ? "" : "새 ") + (isCard ? "카드" : isRec ? (isOcc ? `정기 회의 · ${fmtDate(date)}` : "정기 회의") : "일정");
+  $("#dialogTitle").textContent = (ref ? "" : "New ") + (isCard ? "Card" : isRec ? (isOcc ? `Routine · ${fmtDate(date)}` : "Routine") : "Event");
   $("#recurringFields").hidden = !isRec;
   $("#eventFields").hidden = isRec || isCard;
 
@@ -1009,12 +1017,12 @@ function fillForm({ kind, ref, date }) {
   // 메모: 일정·카드는 항상, 정기 회의는 회차에서만
   const showNote = !isRec || isOcc;
   $("#occurrenceBox").hidden = !showNote;
-  $("#occLabel").textContent = isCard ? "메모 양식" : isRec ? "이번 회의 메모" : "메모";
+  $("#occLabel").textContent = isCard ? "메모 양식" : isRec ? "이번 회차 메모" : "메모";
   form.occNote.value = isRec ? ((ref?.notes || {})[date] || "") : (v.note || "");
 
   // 준비 체크리스트
   checkMode = isCard || (isRec && !isOcc) ? "template" : "instance";
-  $("#checkLabel").textContent = checkMode === "template" ? "기본 준비" : "준비";
+  $("#checkLabel").textContent = checkMode === "template" ? "Default Prep" : "Prep";
   editChecks = checkMode === "template"
     ? (v.prep || []).map((text) => ({ text, done: false }))
     : (isOcc ? occChecks(ref, date) : v.checks || []).map((c) => ({ ...c }));
@@ -1131,7 +1139,7 @@ $("#saveAsCard").onclick = () => {
   const isEvent = editing.kind === "event";
   data.cards.push({ id: uid(), ...base, note: isEvent ? form.occNote.value.trim() : "", prep: editChecks.map((c) => c.text) });
   persist(); renderDeck();
-  toast(`'${base.title}' 카드를 만들었어요. 왼쪽 카드 보관함에서 날짜로 끌어다 놓으세요.`);
+  toast(`'${base.title}' Card를 만들었어요. 왼쪽 Cards에서 날짜로 끌어다 놓으세요.`);
 };
 
 $("#deleteItem").onclick = () => {
@@ -1159,8 +1167,8 @@ function renderRecurringList() {
           el("span", { class: "rec-dot" }),
           el("span", { class: "grow" }, el("strong", {}, r.title), r.place ? el("span", { class: "muted" }, ` · ${r.place}`) : null),
           el("span", { class: "muted" }, `${recLabel(r)} ${timeRange(r.start, r.end)}`),
-          el("button", { class: "btn small", onclick: (e) => { e.stopPropagation(); recDlg.close(); openMinutes(r); } }, "회의록")))
-    : [el("li", { class: "empty" }, "아직 정기 회의가 없어요")]));
+          el("button", { class: "btn small", onclick: (e) => { e.stopPropagation(); recDlg.close(); openMinutes(r); } }, "Notes")))
+    : [el("li", { class: "empty" }, "아직 Routine이 없어요")]));
 }
 $("#manageRecurring").onclick = () => { renderRecurringList(); recDlg.showModal(); };
 $("#closeRecurring").onclick = () => recDlg.close();
@@ -1182,7 +1190,7 @@ function search(q) {
       if (hit(note)) out.push({ date: ds, title: r.title, sub: note, color: r.color, open: { kind: "recurring", ref: r, date: ds } });
   }
   for (const t of data.todos)
-    if (hit(t.text)) out.push({ date: t.date, title: (t.done ? "✓ " : "☐ ") + t.text, sub: "할 일", color: "#8a8a84", open: null });
+    if (hit(t.text)) out.push({ date: t.date, title: (t.done ? "✓ " : "☐ ") + t.text, sub: "To-do", color: "#8a8a84", open: null });
   return out.sort((a, b) => (b.date || "9999").localeCompare(a.date || "9999")).slice(0, 100);
 }
 
@@ -1234,12 +1242,12 @@ function computeReminders() {
   if (s.weeklyReview) {
     const sunday = addDays(mondayOf(new Date()), 6);
     const at = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate(), 21, 0).getTime();
-    if (at > now - 5 * 60000) out.push({ key: `review@${ymd(sunday)}`, at, title: "이번 주 돌아보기", body: reviewSummary(weekStats(mondayOf(new Date()))) + " · 플래너에서 ◔ 버튼" });
+    if (at > now - 5 * 60000) out.push({ key: `review@${ymd(sunday)}`, at, title: "Weekly Review", body: reviewSummary(weekStats(mondayOf(new Date()))) + " · 플래너에서 ◔ 버튼" });
   }
   // 마감 일정: 전날 09:00, 당일 09:00
   for (const e of upcomingDeadlines(2)) {
     const d = parseYmd(e.date);
-    for (const [offset, label] of [[-1, "내일 마감"], [0, "오늘 마감"]]) {
+    for (const [offset, label] of [[-1, "Due tomorrow"], [0, "Due today"]]) {
       const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset, 9, 0).getTime();
       if (at > now - 5 * 60000) out.push({ key: `dl@${e.id}@${e.date}@${offset}`, at, title: `⚑ ${label}: ${e.title}`, body: `${fmtDate(e.date)} ${timeRange(e.start, e.end)}` });
     }
@@ -1330,7 +1338,7 @@ function weekStats(monday) {
   };
 }
 function reviewSummary(st) {
-  return `회의 ${st.meetings.length}회 · 할 일 ${st.todosDone}/${st.todosTotal} 완료` + (st.leftover.length ? ` · 남은 할 일 ${st.leftover.length}개` : "");
+  return `Routine ${st.meetings.length}회 · To-do ${st.todosDone}/${st.todosTotal} 완료` + (st.leftover.length ? ` · 남은 To-do ${st.leftover.length}개` : "");
 }
 
 const reviewDlg = $("#reviewDialog");
@@ -1344,29 +1352,29 @@ function renderReview() {
   const itemRow = (it) => el("li", { style: `--c:${it.color || COLORS[0]}`, onclick: () => { reviewDlg.close(); goTo("week", parseYmd(it.date)); openItem(it); } },
     el("span", { class: "rec-dot" }), el("span", { class: "grow" }, it.title), el("span", { class: "muted small" }, fmtDate(it.date)));
   const end = addDays(reviewMonday, 6);
-  $("#reviewTitle").textContent = `${reviewMonday.getMonth() + 1}월 ${reviewMonday.getDate()}일 – ${end.getMonth() + 1}월 ${end.getDate()}일 돌아보기`;
+  $("#reviewTitle").textContent = `Weekly Review · ${reviewMonday.getMonth() + 1}월 ${reviewMonday.getDate()}일 – ${end.getMonth() + 1}월 ${end.getDate()}일`;
   $("#reviewBody").replaceChildren(...[
     el("div", { class: "rv-grid" },
-      line("일정", `${st.items.length}개`, `회의 ${st.meetings.length}회`),
-      line("회의 메모", `${st.notesWritten}/${st.meetings.length}`, "메모 남긴 회의"),
-      line("준비", pct(st.checksDone, st.checksTotal), `${st.checksDone}/${st.checksTotal} 항목`),
-      line("할 일", pct(st.todosDone, st.todosTotal), `${st.todosDone}/${st.todosTotal} 완료`)),
+      line("Events", `${st.items.length}개`, `Routine ${st.meetings.length}회`),
+      line("Notes", `${st.notesWritten}/${st.meetings.length}`, "메모 남긴 회차"),
+      line("Prep", pct(st.checksDone, st.checksTotal), `${st.checksDone}/${st.checksTotal} 항목`),
+      line("To-do", pct(st.todosDone, st.todosTotal), `${st.todosDone}/${st.todosTotal} 완료`)),
     st.busiest ? el("p", { class: "muted small" }, `가장 바빴던 날: ${fmtDate(st.busiest[0])} (일정 ${st.busiest[1]}개)`) : null,
-    st.unprepared.length ? el("h3", {}, "준비가 덜 된 일정") : null,
+    st.unprepared.length ? el("h3", {}, "Prep이 덜 된 일정") : null,
     st.unprepared.length ? el("ul", { class: "rec-list" }, ...st.unprepared.map(itemRow)) : null,
-    st.leftover.length ? el("h3", {}, `남은 할 일 ${st.leftover.length}개`) : null,
+    st.leftover.length ? el("h3", {}, `남은 To-do ${st.leftover.length}개`) : null,
     st.leftover.length ? el("ul", { class: "rec-list" }, ...st.leftover.map((t) => el("li", {}, el("span", { class: "grow" }, "☐ " + t.text), el("span", { class: "muted small" }, fmtDate(t.date))))) : null,
     st.leftover.length ? el("button", { class: "btn small", onclick: () => {
       const target = ymd(nextMon);
       st.leftover.forEach((t) => (t.date = target));
       persist(); render(); renderReview();
       toast(`남은 할 일을 ${fmtDate(target)}로 옮겼어요`);
-    } }, `↪ 남은 할 일 다음 주 월요일로 옮기기`) : null,
-    el("h3", {}, "다음 주 미리보기"),
-    el("p", { class: "small" }, `일정 ${next.items.length}개 · 회의 ${next.meetings.length}회 · 할 일 ${next.todosTotal}개`),
+    } }, `↪ 남은 To-do 다음 주 월요일로 옮기기`) : null,
+    el("h3", {}, "Next Week"),
+    el("p", { class: "small" }, `Events ${next.items.length}개 · Routine ${next.meetings.length}회 · To-do ${next.todosTotal}개`),
     ...(() => {
       const dls = next.items.filter((it) => it.deadline).concat(st.items.filter((it) => it.deadline && it.date >= todayStr()));
-      return dls.length ? [el("h3", {}, "다가오는 마감"), el("ul", { class: "rec-list" }, ...dls.map(itemRow))] : [];
+      return dls.length ? [el("h3", {}, "Due"), el("ul", { class: "rec-list" }, ...dls.map(itemRow))] : [];
     })()].filter(Boolean));
 }
 function openReview(monday = mondayOf(cursor)) { reviewMonday = monday; renderReview(); reviewDlg.showModal(); }
@@ -1399,13 +1407,13 @@ function minutesEntries(r) {
 function renderMinutes() {
   const r = minutesOf, q = $("#minutesSearch").value.trim().toLowerCase();
   const entries = minutesEntries(r).filter((x) => !q || (x.note + " " + x.title).toLowerCase().includes(q));
-  $("#minutesTitle").textContent = `${r.title} 회의록`;
+  $("#minutesTitle").textContent = `${r.title} Notes`;
   $("#minutesList").replaceChildren(...(entries.length
     ? entries.map((x) => el("li", { onclick: () => { minutesDlg.close(); goTo("week", parseYmd(x.date)); fillForm(x.open); } },
         el("div", { class: "mn-head" },
           el("strong", {}, `${x.date.slice(0, 4)}년 ${fmtDate(x.date)}`),
           x.extra ? el("span", { class: "badge" }, x.title === r.title ? "변경된 회차" : x.title) : null,
-          x.checks.length ? el("span", { class: "badge" }, `준비 ${x.checks.filter((c) => c.done).length}/${x.checks.length}`) : null),
+          x.checks.length ? el("span", { class: "badge" }, `Prep ${x.checks.filter((c) => c.done).length}/${x.checks.length}`) : null),
         x.note ? el("div", { class: "mn-note" }, x.note) : el("div", { class: "muted small" }, "메모 없음")))
     : [el("li", { class: "empty" }, q ? "검색 결과가 없어요" : "아직 남긴 회의 메모가 없어요. 회차를 열어 '이번 회의 메모'를 적어 보세요.")]));
 }
@@ -1414,11 +1422,11 @@ $("#minutesSearch").addEventListener("input", renderMinutes);
 $("#closeMinutes").onclick = () => minutesDlg.close();
 $("#exportMinutes").onclick = () => {
   const r = minutesOf;
-  const md = [`# ${r.title} 회의록`, "", ...minutesEntries(r).reverse().flatMap((x) => [
+  const md = [`# ${r.title} Notes`, "", ...minutesEntries(r).reverse().flatMap((x) => [
     `## ${x.date} (${DAY_NAMES[parseYmd(x.date).getDay()]})${x.extra && x.title !== r.title ? ` — ${x.title}` : ""}`,
-    ...(x.checks.length ? ["", "**준비**", ...x.checks.map((c) => `- [${c.done ? "x" : " "}] ${c.text}`)] : []),
+    ...(x.checks.length ? ["", "**Prep**", ...x.checks.map((c) => `- [${c.done ? "x" : " "}] ${c.text}`)] : []),
     "", x.note || "_메모 없음_", ""])].join("\n");
-  saveFile(`회의록_${r.title}_${stamp()}.md`, md, "text/markdown").catch((e) => showError(errText(e)));
+  saveFile(`Notes_${r.title}_${stamp()}.md`, md, "text/markdown").catch((e) => showError(errText(e)));
 };
 
 // ═════════════════════════ 테마 ═════════════════════════
