@@ -345,7 +345,7 @@ function attachQuick(input, preview) {
       form.title.value = q.title; form.place.value = q.place;
       setTime(form.start, q.start); setTime(form.end, q.end); endTouched = !!q.end;
       if (q.kind === "recurring") { form.weekday.value = String(q.weekday); form.freq.value = q.freq; form.nth.value = String(q.nth || 1); syncFreqFields(); form.startDate.value = q.startDate; }
-      else { form.date.value = q.date; form.endDate.value = q.endDate || ""; form.deadline.checked = q.deadline; }
+      else { form.date.value = q.date; form.endDate.value = q.endDate || q.date; form.deadline.checked = q.deadline; }
     } else createFromQuick(q);
     input.value = ""; update();
   });
@@ -528,7 +528,8 @@ function renderDeck() {
           el("div", { class: "deck-sub" }, "+ 눌러서 만들기"))]),
     el("div", { class: "deck-head sub" },
       el("button", { class: "deck-link", title: "Routines 목록 · 회차 Notes", onclick: () => { renderRecurringList(); recDlg.showModal(); } },
-        el("strong", {}, "Routines"), el("span", { class: "muted" }, " ›"))),
+        el("strong", {}, "Routines"), el("span", { class: "muted" }, " ›")),
+      el("button", { class: "icon-btn small", title: "새 Routine", onclick: () => openNew("recurring", null) }, "+")),
     recs.length ? null : el("div", { class: "deck-hint" }, "+ Routine 으로 반복 일정 추가"),
     ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)));
 }
@@ -1014,12 +1015,14 @@ function fillForm({ kind, ref, date }) {
   endTouched = !!v.end;
   form.place.value = v.place || "";
   form.date.value = v.date || date || todayStr();
-  form.endDate.value = v.endDate || "";
+  form.endDate.value = v.endDate || form.date.value;
   form.deadline.checked = !!v.deadline;
   form.weekday.value = String(v.weekday ?? (date ? parseYmd(date).getDay() : new Date().getDay()));
   form.freq.value = v.freq || "weekly";
   form.nth.value = String(v.nth || 1);
   form.startDate.value = v.startDate || ymd(date ? mondayOf(parseYmd(date)) : weekStart);
+  form.recEndDate.value = isRec ? v.endDate || "" : "";
+  form.recEndDate.classList.remove("invalid");
   syncFreqFields();
   pickedColor = v.color || COLORS[0];
   renderColors();
@@ -1028,6 +1031,7 @@ function fillForm({ kind, ref, date }) {
   $("#scopeBox").hidden = !isOcc;
   form.scope.value = "future";
   $("#startDateField").hidden = isOcc;
+  $("#recEndDateField").hidden = isOcc;
 
   // 메모: 일정·카드는 항상, 정기 회의는 회차에서만
   const showNote = !isRec || isOcc;
@@ -1098,6 +1102,17 @@ form.addEventListener("submit", (e) => {
     if (ref) Object.assign(ref, card); else data.cards.push({ id: uid(), ...card });
   } else if (kind === "recurring") {
     const rule = { weekday: Number(form.weekday.value), freq: form.freq.value, nth: Number(form.nth.value) };
+    if (!ref || !date) {
+      const startDate = form.startDate.value || ref?.startDate || todayStr();
+      const endDate = form.recEndDate.value;
+      if (endDate && endDate < startDate) {
+        form.recEndDate.classList.add("invalid");
+        toast("종료일은 시작일보다 빠를 수 없어요.");
+        return form.recEndDate.focus();
+      }
+      form.recEndDate.classList.remove("invalid");
+      rule.endDate = endDate;
+    }
     if (!ref) {
       data.recurring.push({ id: uid(), skips: [], notes: {}, checks: {}, prep, ...base, ...rule, startDate: form.startDate.value || todayStr() });
     } else if (!date) {
@@ -1646,7 +1661,6 @@ function toggleDeck() {
   try { localStorage.setItem("planner-deck", deckOpen ? "1" : "0"); } catch {}
   render();
 }
-$("#addRecurring").onclick = () => openNew("recurring", null);
 
 // 실행 취소: 앱에서는 메뉴(⌘Z)가 이벤트로 알려 줌, 브라우저에서는 키 입력으로
 if (IN_TAURI && window.__TAURI__.event)
