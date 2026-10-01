@@ -108,8 +108,9 @@ async function flush() {
 }
 
 // ═════════════════════════ 반복 규칙 ═════════════════════════
+const routineDays = (r) => r.weekdays?.length ? r.weekdays : [r.weekday];
 function occursOn(r, ds, dow) {
-  if (r.weekday !== dow) return false;
+  if (!routineDays(r).includes(dow)) return false;
   if (r.startDate && ds < r.startDate) return false;
   if (r.endDate && ds > r.endDate) return false;
   if ((r.skips || []).includes(ds)) return false;
@@ -127,7 +128,7 @@ function occursOn(r, ds, dow) {
 }
 
 function recLabel(r) {
-  const day = DAY_NAMES[r.weekday];
+  const day = routineDays(r).map((d) => DAY_NAMES[d]).join("·");
   if (r.freq === "biweekly") return `격주 ${day}`;
   if (r.freq === "monthly") return `매월 ${NTH_NAMES[r.nth || 1]} ${day}`;
   return `매주 ${day}`;
@@ -344,7 +345,7 @@ function attachQuick(input, preview) {
       fillForm({ kind: q.kind, ref: null, date: q.date });
       form.title.value = q.title; form.place.value = q.place;
       setTime(form.start, q.start); setTime(form.end, q.end); endTouched = !!q.end;
-      if (q.kind === "recurring") { form.weekday.value = String(q.weekday); form.freq.value = q.freq; form.nth.value = String(q.nth || 1); syncFreqFields(); form.startDate.value = q.startDate; }
+      if (q.kind === "recurring") { setWeekdays([q.weekday]); form.freq.value = q.freq; form.nth.value = String(q.nth || 1); syncFreqFields(); form.startDate.value = q.startDate; }
       else { form.date.value = q.date; form.endDate.value = q.endDate || q.date; form.deadline.checked = q.deadline; }
     } else createFromQuick(q);
     input.value = ""; update();
@@ -899,6 +900,10 @@ function renderColors() {
   $("#colorPicker").replaceChildren(...COLORS.map((c) =>
     el("button", { type: "button", class: "swatch" + (c === pickedColor ? " on" : ""), style: `--c:${c}`, onclick: () => { pickedColor = c; renderColors(); } })));
 }
+function setWeekdays(days) {
+  form.querySelectorAll('input[name="weekdays"]').forEach((input) => { input.checked = days.includes(Number(input.value)); });
+}
+$("#closeItem").onclick = () => dlg.close();
 const syncFreqFields = () => { $("#nthField").hidden = form.freq.value !== "monthly"; };
 form.freq.addEventListener("change", syncFreqFields);
 
@@ -1017,7 +1022,7 @@ function fillForm({ kind, ref, date }) {
   form.date.value = v.date || date || todayStr();
   form.endDate.value = v.endDate || form.date.value;
   form.deadline.checked = !!v.deadline;
-  form.weekday.value = String(v.weekday ?? (date ? parseYmd(date).getDay() : new Date().getDay()));
+  setWeekdays(v.weekdays?.length ? v.weekdays : [v.weekday ?? (date ? parseYmd(date).getDay() : new Date().getDay())]);
   form.freq.value = v.freq || "weekly";
   form.nth.value = String(v.nth || 1);
   form.startDate.value = v.startDate || ymd(date ? mondayOf(parseYmd(date)) : weekStart);
@@ -1101,7 +1106,9 @@ form.addEventListener("submit", (e) => {
     const card = { ...base, note, prep };
     if (ref) Object.assign(ref, card); else data.cards.push({ id: uid(), ...card });
   } else if (kind === "recurring") {
-    const rule = { weekday: Number(form.weekday.value), freq: form.freq.value, nth: Number(form.nth.value) };
+    const weekdays = [...form.querySelectorAll('input[name="weekdays"]:checked')].map((input) => Number(input.value));
+    if (!weekdays.length) { toast("요일을 하나 이상 선택해 주세요."); return form.querySelector('input[name="weekdays"]').focus(); }
+    const rule = { weekday: weekdays[0], weekdays, freq: form.freq.value, nth: Number(form.nth.value) };
     if (!ref || !date) {
       const startDate = form.startDate.value || ref?.startDate || todayStr();
       const endDate = form.recEndDate.value;
@@ -1121,7 +1128,7 @@ form.addEventListener("submit", (e) => {
       // 특정 회차에서 수정
       conflictDate = date;
       const changes = { ...base, ...rule };
-      const changed = Object.keys(changes).some((k) => String(changes[k] ?? "") !== String(ref[k] ?? (k === "freq" ? "weekly" : k === "nth" ? 1 : "")));
+      const changed = Object.keys(changes).some((k) => String(changes[k] ?? "") !== String((k === "weekdays" ? routineDays(ref) : ref[k]) ?? (k === "freq" ? "weekly" : k === "nth" ? 1 : "")));
       const saveOcc = (r) => {
         r.notes = r.notes || {}; r.checks = r.checks || {};
         if (note) r.notes[date] = note; else delete r.notes[date];
@@ -1190,7 +1197,7 @@ $("#deleteItem").onclick = () => {
 const recDlg = $("#recurringDialog");
 function renderRecurringList() {
   const items = activeSeries().sort((a, b) =>
-    WEEK_ORDER.indexOf(a.weekday) - WEEK_ORDER.indexOf(b.weekday) || (a.start || "").localeCompare(b.start || ""));
+    WEEK_ORDER.indexOf(routineDays(a)[0]) - WEEK_ORDER.indexOf(routineDays(b)[0]) || (a.start || "").localeCompare(b.start || ""));
   $("#recurringList").replaceChildren(...(items.length
     ? items.map((r) =>
         el("li", { style: `--c:${r.color}`, onclick: () => { recDlg.close(); fillForm({ kind: "recurring", ref: r, date: null }); } },
@@ -1332,9 +1339,9 @@ function buildIcs() {
     // 첫 회차 찾기 (건너뛴 날 포함해서 규칙상 첫 날짜)
     const first = firstOccurrence(r);
     if (!first) continue;
-    const day = ICS_DAY[r.weekday];
+    const day = routineDays(r).map((d) => ICS_DAY[d]).join(",");
     let rule = r.freq === "biweekly" ? `FREQ=WEEKLY;INTERVAL=2;BYDAY=${day}`
-      : r.freq === "monthly" ? `FREQ=MONTHLY;BYDAY=${r.nth || 1}${day}`
+      : r.freq === "monthly" ? `FREQ=MONTHLY;BYDAY=${routineDays(r).map((d) => `${r.nth || 1}${ICS_DAY[d]}`).join(",")}`
       : `FREQ=WEEKLY;BYDAY=${day}`;
     if (r.endDate) rule += `;UNTIL=${icsDate(r.endDate)}T235959`;
     L.push("BEGIN:VEVENT", `UID:${r.id}@planner`, `DTSTAMP:${dtstamp}`, `SUMMARY:${icsEsc(r.title)}`);

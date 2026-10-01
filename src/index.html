@@ -47,7 +47,10 @@
   <!-- 일정 / 정기 회의 편집 -->
   <dialog id="itemDialog">
     <form id="itemForm" method="dialog">
-      <h2 id="dialogTitle"></h2>
+      <div class="item-dialog-head">
+        <h2 id="dialogTitle"></h2>
+        <button type="button" id="closeItem" class="icon-btn small" aria-label="닫기" title="닫기 (Esc)">×</button>
+      </div>
       <label>제목
         <input name="title" required autocomplete="off" placeholder="제목" />
       </label>
@@ -68,15 +71,20 @@
               <option value="-1">마지막</option>
             </select>
           </label>
-          <label>요일
-            <select name="weekday">
-              <option value="1">월요일</option><option value="2">화요일</option>
-              <option value="3">수요일</option><option value="4">목요일</option>
-              <option value="5">금요일</option><option value="6">토요일</option>
-              <option value="0">일요일</option>
-            </select>
-          </label>
+
         </div>
+        <fieldset class="weekday-picker">
+          <legend>요일 (여러 개 선택)</legend>
+          <div class="weekday-options">
+            <label><input type="checkbox" name="weekdays" value="1" /> 월</label>
+            <label><input type="checkbox" name="weekdays" value="2" /> 화</label>
+            <label><input type="checkbox" name="weekdays" value="3" /> 수</label>
+            <label><input type="checkbox" name="weekdays" value="4" /> 목</label>
+            <label><input type="checkbox" name="weekdays" value="5" /> 금</label>
+            <label><input type="checkbox" name="weekdays" value="6" /> 토</label>
+            <label><input type="checkbox" name="weekdays" value="0" /> 일</label>
+          </div>
+        </fieldset>
         <label id="startDateField">시작일
           <input type="date" name="startDate" />
         </label>
