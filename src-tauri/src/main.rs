@@ -22,6 +22,8 @@ const BACKUP_KEEP: usize = 14;
 
 /// 미니 창이 포커스를 잃어 숨겨진 시각 (트레이 클릭으로 바로 다시 열리는 것 방지)
 static MINI_HIDDEN_AT: Mutex<Option<Instant>> = Mutex::new(None);
+static WIDGET_SAVE_AT: Mutex<Option<Instant>> = Mutex::new(None);
+static WIDGET_SAVE_RUNNING: Mutex<bool> = Mutex::new(false);
 
 // ───────────── 데이터 저장 ─────────────
 
@@ -132,7 +134,7 @@ fn save_data(app: AppHandle, data: String, day: String) -> Result<(), String> {
         let mut files: Vec<PathBuf> = fs::read_dir(&bdir)
             .map_err(|e| e.to_string())?
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().map_or(false, |x| x == "json"))
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
             .collect();
         files.sort();
         if files.len() > BACKUP_KEEP {
@@ -290,8 +292,30 @@ fn save_widget(app: &AppHandle, w: &Widget) {
         let _ = fs::write(p, s);
     }
 }
+fn schedule_widget_save(app: &AppHandle) {
+    *WIDGET_SAVE_AT.lock().unwrap() = Some(Instant::now() + Duration::from_millis(200));
+    let mut running = WIDGET_SAVE_RUNNING.lock().unwrap();
+    if *running { return }
+    *running = true;
+    let app = app.clone();
+    thread::spawn(move || loop {
+        let wait = WIDGET_SAVE_AT.lock().unwrap().and_then(|at| at.checked_duration_since(Instant::now()));
+        if let Some(wait) = wait {
+            thread::sleep(wait);
+            continue;
+        }
+        if let Some(state) = app.try_state::<WidgetState>() {
+            save_widget(&app, &state.0.lock().unwrap());
+        }
+        let mut at = WIDGET_SAVE_AT.lock().unwrap();
+        if at.is_some_and(|deadline| deadline > Instant::now()) { continue }
+        *at = None;
+        *WIDGET_SAVE_RUNNING.lock().unwrap() = false;
+        break;
+    });
+}
 fn widget_pinned(app: &AppHandle) -> bool {
-    app.try_state::<WidgetState>().map_or(false, |s| s.0.lock().unwrap().pinned)
+    app.try_state::<WidgetState>().is_some_and(|s| s.0.lock().unwrap().pinned)
 }
 
 /// 고정 상태에 맞게 미니 창 설정 (위치·크기 복원, 모든 데스크탑에 표시)
@@ -346,7 +370,7 @@ fn toggle_mini(app: &AppHandle) {
         let just_hidden = MINI_HIDDEN_AT
             .lock()
             .unwrap()
-            .map_or(false, |t| t.elapsed() < Duration::from_millis(300));
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(300));
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
         } else if !just_hidden {
@@ -423,7 +447,14 @@ fn main() {
                 .show_menu_on_left_click(false) // 왼쪽 클릭: 미니 창, 오른쪽 클릭: 메뉴
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main_window(app),
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        let _ = app.emit("quit-requested", ());
+                        let app = app.clone();
+                        thread::spawn(move || {
+                            thread::sleep(Duration::from_millis(800));
+                            app.exit(0);
+                        });
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -468,7 +499,8 @@ fn main() {
                 if let Some(state) = app.try_state::<WidgetState>() {
                     let mut st = state.0.lock().unwrap();
                     st.x = Some(pos.x); st.y = Some(pos.y);
-                    save_widget(app, &st);
+                    drop(st);
+                    schedule_widget_save(app);
                 }
             }
             WindowEvent::Resized(size) if window.label() == "mini" && widget_pinned(window.app_handle()) && size.width > 0 => {
@@ -476,7 +508,8 @@ fn main() {
                 if let Some(state) = app.try_state::<WidgetState>() {
                     let mut st = state.0.lock().unwrap();
                     st.w = Some(size.width); st.h = Some(size.height);
-                    save_widget(app, &st);
+                    drop(st);
+                    schedule_widget_save(app);
                 }
             }
             _ => {}
