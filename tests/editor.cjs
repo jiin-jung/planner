@@ -3,6 +3,73 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/../src/app.js`, 'utf8');
+
+const mergeContext = vm.createContext({});
+vm.runInContext(source.slice(source.indexOf('const DEFAULT_SETTINGS'), source.indexOf('const store =')), mergeContext);
+const normalized = JSON.parse(vm.runInContext(`JSON.stringify(normalize({ recurring: [{ id: 'r', weekday: 4 }], events: null, todos: null, cards: {} }))`, mergeContext));
+assert.deepEqual(normalized.recurring[0].weekdays, [4]);
+assert.equal(normalized.recurring[0].weekday, 4);
+assert.deepEqual(normalized.events, []);
+assert.deepEqual(normalized.todos, []);
+assert.deepEqual(normalized.cards, []);
+const merged = JSON.parse(vm.runInContext(`JSON.stringify(mergeData(
+  { events: [{ id: 'a', title: 'base' }, { id: 'b', title: 'base' }, { id: 'c', title: 'base' }, { id: 'd', title: 'base' }] },
+  { events: [{ id: 'a', title: 'local' }, { id: 'c', title: 'base' }, { id: 'd', title: 'base' }, { id: 'l', title: 'local add' }], settings: { theme: 'dark' } },
+  { events: [{ id: 'a', title: 'remote' }, { id: 'b', title: 'remote' }, { id: 'c', title: 'remote' }, { id: 'r', title: 'remote add' }], settings: { theme: 'light' } }
+))`, mergeContext));
+assert.deepEqual(Object.fromEntries(merged.events.map(item => [item.id, item.title])), {
+  a: 'local', c: 'remote', l: 'local add', r: 'remote add',
+});
+assert.equal(merged.settings.theme, 'dark');
+console.log('Normalization and three-way merge passed');
+
+const seriesContext = vm.createContext({
+  data: { recurring: [] }, todayStr: () => '2026-09-30', uid: () => 'next',
+  structuredClone, parseYmd: value => new Date(`${value}T00:00:00`),
+  addDays: (date, days) => new Date(date.getTime() + days * 864e5),
+  ymd: date => date.toISOString().slice(0, 10),
+});
+vm.runInContext(source.slice(source.indexOf('const sameSeries ='), source.indexOf('// 체크리스트 저장')), seriesContext);
+seriesContext.data.recurring = [
+  { id: 'old', seriesId: 'series', title: '같은 제목', startDate: '2026-09-01', endDate: '2026-10-01' },
+  { id: 'next', seriesId: 'series', title: '바뀐 제목', startDate: '2026-10-02' },
+  { id: 'other', title: '같은 제목', startDate: '2026-10-02' },
+];
+assert.deepEqual(Array.from(vm.runInContext('activeSeries().map(item => item.id)', seriesContext)), ['next', 'other']);
+vm.runInContext(source.slice(source.indexOf('function splitSeries('), source.indexOf('form.addEventListener("submit"')), seriesContext);
+seriesContext.routine = { id: 'root', title: '회의', startDate: '2026-09-01', skips: [], notes: {}, checks: {} };
+seriesContext.data.recurring = [seriesContext.routine];
+vm.runInContext(`splitSeries(routine, '2026-10-01', { title: '새 제목' })`, seriesContext);
+assert.equal(seriesContext.routine.seriesId, 'root');
+assert.equal(seriesContext.data.recurring[1].seriesId, 'root');
+console.log('Split series identity passed');
+
+const quickContext = vm.createContext({ setTimeout() {}, toast() {}, data: { todos: [] }, uid: () => 'new' });
+vm.runInContext(source.slice(source.indexOf('const DAY_NAMES'), source.indexOf('// ═════════════════════════ 데이터')), quickContext);
+vm.runInContext(source.slice(source.indexOf('const DOW_MAP'), source.indexOf('function describeQuick')), quickContext);
+const now = new Date(2026, 8, 30, 9);
+const quickCases = [
+  ['수 19시 운영진 회의 @7호관', { title: '운영진 회의', date: '2026-09-30', start: '19:00', end: '20:00', place: '7호관' }],
+  ['내일 3시 멘토링', { title: '멘토링', date: '2026-10-01', start: '15:00', end: '16:00' }],
+  ['10/20 캡스톤 제출 마감', { title: '캡스톤 제출 마감', date: '2026-10-20', deadline: true }],
+  ['매주 목 20:00-22:00 스터디', { kind: 'recurring', title: '스터디', weekday: 4, start: '20:00', end: '22:00' }],
+  ['매월 첫째 금 18시 총회', { kind: 'recurring', title: '총회', weekday: 5, nth: 1, start: '18:00', end: '19:00' }],
+  ['다음주 화 오후 2시 반 면담 1시간', { title: '면담', date: '2026-10-06', start: '14:30', end: '15:30' }],
+  ['10/3-5 축제', { title: '축제', date: '2026-10-03', endDate: '2026-10-05' }],
+  ['3-5시 회의', { title: '회의', date: '2026-09-30', start: '15:00', end: '17:00' }],
+];
+for (const [input, expected] of quickCases) {
+  quickContext.input = input; quickContext.now = now;
+  const actual = JSON.parse(vm.runInContext('JSON.stringify(parseQuick(input, now))', quickContext));
+  for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], value, `${input}: ${key}`);
+}
+vm.runInContext(source.slice(source.indexOf('function syncNoteTodos('), source.indexOf('// ═════════════════════════ D-day')), quickContext);
+quickContext.data.todos = [{ id: 'old', date: '2026-09-30', text: '삭제됨', done: false, src: 'note' }];
+quickContext.note = '- [ ] 새 작업';
+vm.runInContext(`syncNoteTodos(note, 'note', '2026-09-30')`, quickContext);
+assert.deepEqual(quickContext.data.todos.map(todo => todo.text), ['새 작업']);
+console.log('Quick parser examples and note todo cleanup passed');
+
 const fields = {};
 const form = new Proxy({}, { get: (_, key) => fields[key] ||= { value: '', focus() {}, classList: { add() {}, remove() {} } } });
 const dayInputs = [1, 2, 3, 4, 5, 6, 0].map(value => ({ value: String(value), checked: false, focus() {} }));
@@ -52,7 +119,7 @@ context.args.ref = { startDate: '2026-10-01', endDate: '2026-10-31' };
 vm.runInContext('fillForm(args)', context);
 assert.equal(form.recEndDate.value, '2026-10-31');
 vm.runInContext(source.slice(source.indexOf('function occursOn('), source.indexOf('function recLabel(')), context);
-context.routine = { weekday: 4, startDate: '2026-10-01', endDate: '2026-10-08' };
+context.routine = { weekday: 4, weekdays: [4], startDate: '2026-10-01', endDate: '2026-10-08' };
 assert.equal(vm.runInContext("occursOn(routine, '2026-10-08', 4)", context), true);
 assert.equal(vm.runInContext("occursOn(routine, '2026-10-15', 4)", context), false);
 let submit;
@@ -87,6 +154,7 @@ console.log('Multiple weekdays and empty selection validation passed');
 Object.assign(context, {
   ICS_DAY: ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'],
   firstOccurrence: () => '2026-10-07', addMinutes: () => '20:00',
+  addDays: (date, days) => new Date(date.getTime() + days * 864e5), TextEncoder,
 });
 context.data.events = [];
 context.data.recurring = [{ id: 'multi', title: 'Routine', weekdays: [3, 4], freq: 'weekly', start: '19:00', end: '20:00' }];
@@ -95,6 +163,14 @@ assert.match(vm.runInContext('buildIcs()', context), /RRULE:FREQ=WEEKLY;BYDAY=WE
 context.data.recurring[0].freq = 'monthly';
 context.data.recurring[0].nth = 2;
 assert.match(vm.runInContext('buildIcs()', context), /RRULE:FREQ=MONTHLY;BYDAY=2WE,2TH/);
+context.data.recurring[0].freq = 'weekly';
+context.data.recurring[0].start = '';
+context.data.recurring[0].endDate = '2026-10-31';
+context.data.recurring[0].title = '긴한글제목'.repeat(12);
+const ics = vm.runInContext('buildIcs()', context);
+assert.match(ics, /RRULE:FREQ=WEEKLY;BYDAY=WE,TH;UNTIL=20261031\r\n/);
+assert.match(ics, /\r\n /);
+assert.ok(ics.split('\r\n').every(line => Buffer.byteLength(line) <= 75));
 let closed = false;
 context.dlg = { close() { closed = true; } };
 vm.runInContext(source.slice(source.indexOf('$("#closeItem").onclick'), source.indexOf('const syncFreqFields =')), context);

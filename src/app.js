@@ -33,7 +33,7 @@ const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
 const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 const fromMin = (x) => { x = Math.max(0, Math.min(x, 23 * 60 + 59)); return `${pad(Math.floor(x / 60))}:${pad(x % 60)}`; };
 const fmtDate = (ds) => { const d = parseYmd(ds); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_NAMES[d.getDay()]})`; };
-const addMinutes = (t, mins) => { const [h, m] = t.split(":").map(Number); const x = Math.min(h * 60 + m + mins, 23 * 60 + 59); return `${pad(Math.floor(x / 60))}:${pad(x % 60)}`; };
+const addMinutes = (t, mins) => fromMin(toMin(t) + mins);
 
 // ═════════════════════════ 데이터 ═════════════════════════
 const DEFAULT_SETTINGS = { notify: true, lead: 10, weeklyReview: true, theme: "system" };
@@ -41,10 +41,31 @@ let data = { recurring: [], events: [], todos: [], cards: [], settings: { ...DEF
 let ready = false;      // 불러오기 성공 전에는 저장 금지 (기존 파일 덮어쓰기 방지)
 let saveTimer = null;
 
-const normalize = (d) => ({
-  recurring: [], events: [], todos: [], cards: [], ...d,
-  settings: { ...DEFAULT_SETTINGS, ...(d?.settings || {}) },
-});
+const normalize = (d = {}) => {
+  d ||= {};
+  const arrays = Object.fromEntries(["recurring", "events", "todos", "cards"].map((k) => [k, Array.isArray(d[k]) ? d[k] : []]));
+  arrays.recurring = arrays.recurring.map((r) => {
+    const weekdays = Array.isArray(r.weekdays) && r.weekdays.length ? r.weekdays : [r.weekday].filter((x) => x != null);
+    return { ...r, weekdays, weekday: weekdays[0] };
+  });
+  return { ...d, ...arrays, settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) } };
+};
+
+function mergeData(base, local, remote) {
+  base = normalize(base); local = normalize(local); remote = normalize(remote);
+  const merged = { ...remote, ...local, settings: local.settings };
+  for (const key of ["recurring", "events", "todos", "cards"]) {
+    const b = new Map(base[key].map((x) => [x.id, x]));
+    const l = new Map(local[key].map((x) => [x.id, x]));
+    const r = new Map(remote[key].map((x) => [x.id, x]));
+    merged[key] = [...new Set([...l.keys(), ...r.keys()])].flatMap((id) => {
+      const localChanged = JSON.stringify(l.get(id)) !== JSON.stringify(b.get(id));
+      const item = localChanged ? l.get(id) : r.get(id);
+      return item === undefined ? [] : [item];
+    });
+  }
+  return normalize(merged);
+}
 
 const store = {
   async load() {
@@ -52,10 +73,16 @@ const store = {
     return raw ? JSON.parse(raw) : null;
   },
   async save() {
-    const raw = JSON.stringify(data);
     try {
+      const remote = await store.load();
+      const remoteRaw = JSON.stringify(remote);
+      const merged = lastLoaded !== null && remoteRaw !== lastLoaded;
+      if (merged) data = mergeData(JSON.parse(lastLoaded), data, remote || {});
+      const raw = JSON.stringify(data);
       if (IN_TAURI) await invoke("save_data", { data: raw, day: todayStr() });
       else localStorage.setItem(LS_KEY, raw);
+      lastLoaded = raw; snapshot = raw;
+      if (merged) render();
     } catch (e) {
       showError("저장 실패: " + errText(e));
     }
@@ -108,7 +135,7 @@ async function flush() {
 }
 
 // ═════════════════════════ 반복 규칙 ═════════════════════════
-const routineDays = (r) => r.weekdays?.length ? r.weekdays : [r.weekday];
+const routineDays = (r) => r.weekdays;
 function occursOn(r, ds, dow) {
   if (!routineDays(r).includes(dow)) return false;
   if (r.startDate && ds < r.startDate) return false;
@@ -153,17 +180,17 @@ function itemsFor(ds) {
     });
   const items = [...rec, ...ev].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
   // 시간 겹침 표시
-  const mins = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
-  const timed = items.filter((it) => it.start && !it.span).map((it) => ({ it, s: mins(it.start), e: it.end ? mins(it.end) : mins(it.start) + 60 }));
+  const timed = items.filter((it) => it.start && !it.span).map((it) => ({ it, s: toMin(it.start), e: it.end ? toMin(it.end) : toMin(it.start) + 60 }));
   for (const a of timed) for (const b of timed)
     if (a !== b && a.s < b.e && b.s < a.e) (a.it.conflicts ||= []).push(b.it.title);
   return items;
 }
 
 // 끝나지 않았고, 뒤를 잇는 시리즈가 없는 정기 회의 (분할된 경우 최신 것만)
+const sameSeries = (a, b) => a.seriesId && b.seriesId ? a.seriesId === b.seriesId : !a.seriesId && !b.seriesId && a.title === b.title;
 const activeSeries = () => data.recurring.filter((r) =>
   (!r.endDate || r.endDate >= todayStr()) &&
-  !(r.endDate && data.recurring.some((o) => o !== r && o.title === r.title && o.startDate > r.endDate)));
+  !(r.endDate && data.recurring.some((o) => o !== r && sameSeries(o, r) && o.startDate > r.endDate)));
 
 // 체크리스트 저장 (정기 회의는 회차별로 저장)
 function setChecks(kind, ref, date, checks) {
@@ -185,14 +212,6 @@ const el = (tag, attrs = {}, ...children) => {
   for (const c of children) if (c != null && c !== false) n.append(c);
   return n;
 };
-
-// 빈 값(null/false)이 "null" 글자로 찍히지 않도록 전역에서 걸러냄
-for (const proto of [Element.prototype, DocumentFragment.prototype]) {
-  for (const fn of ["replaceChildren", "append", "prepend"]) {
-    const orig = proto[fn];
-    proto[fn] = function (...kids) { return orig.apply(this, kids.filter((k) => k != null && k !== false)); };
-  }
-}
 
 function showError(msg) {
   let bar = document.getElementById("errorBar");
@@ -223,7 +242,7 @@ function parseQuick(input, now = new Date()) {
   const setDate = (d) => { out.date = ymd(d); out.dateExplicit = true; };
 
   take(/\s@(\S+)/, (m) => (out.place = m[1]));
-  take(/\s!(?=\s)|\s!(?=\S)/, () => (out.deadline = true));
+  take(/\s!/, () => (out.deadline = true));
   if (/마감|제출|데드라인|D-?day/i.test(t)) out.deadline = true;
 
   // 반복
@@ -241,16 +260,13 @@ function parseQuick(input, now = new Date()) {
     out.date || take(/\s(\d{1,3})\s*일\s*(?:뒤|후)(?=\s)/, (m) => setDate(addDays(today, +m[1])));
     out.date || take(/\s(\d{4})-(\d{1,2})-(\d{1,2})(?=\s)/, (m) => setDate(new Date(+m[1], m[2] - 1, +m[3])));
     const md = (mo, da) => { let d = new Date(today.getFullYear(), mo - 1, da); if (d < addDays(today, -30)) d = new Date(today.getFullYear() + 1, mo - 1, da); return d; };
-    out.date || take(/\s(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*[~-]\s*(?:(\d{1,2})\s*월\s*)?(\d{1,2})\s*일(?=\s)/, (m) => {
+    const setRange = (m) => {
       const a = md(+m[1], +m[2]); setDate(a);
       let b = new Date(a.getFullYear(), (m[3] ? +m[3] : +m[1]) - 1, +m[4]); if (b < a) b = new Date(b.getFullYear() + 1, b.getMonth(), b.getDate());
       out.endDate = ymd(b);
-    });
-    out.date || take(/\s(\d{1,2})[\/.](\d{1,2})\s*[~-]\s*(?:(\d{1,2})[\/.])?(\d{1,2})(?=\s)/, (m) => {
-      const a = md(+m[1], +m[2]); setDate(a);
-      let b = new Date(a.getFullYear(), (m[3] ? +m[3] : +m[1]) - 1, +m[4]); if (b < a) b = new Date(b.getFullYear() + 1, b.getMonth(), b.getDate());
-      out.endDate = ymd(b);
-    });
+    };
+    out.date || take(/\s(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*[~-]\s*(?:(\d{1,2})\s*월\s*)?(\d{1,2})\s*일(?=\s)/, setRange);
+    out.date || take(/\s(\d{1,2})[\/.](\d{1,2})\s*[~-]\s*(?:(\d{1,2})[\/.])?(\d{1,2})(?=\s)/, setRange);
     out.date || take(/\s(\d{1,2})\s*월\s*(\d{1,2})\s*일(?=\s|까지)/, (m) => setDate(md(+m[1], +m[2])));
     out.date || take(/\s(\d{1,2})[\/.](\d{1,2})(?=\s|까지)/, (m) => setDate(md(+m[1], +m[2])));
     out.date || take(/\s(이번\s*주|다음\s*주|다다음\s*주)?\s*([월화수목금토일])(?:요일)?(?=\s|까지)/, (m) => {
@@ -315,7 +331,7 @@ function describeQuick(q) {
 function createFromQuick(q) {
   const base = { title: q.title, start: q.start, end: q.end, place: q.place, color: COLORS[q.kind === "recurring" ? 0 : q.deadline ? 3 : 0] };
   if (q.kind === "recurring") {
-    data.recurring.push({ id: uid(), skips: [], notes: {}, checks: {}, prep: [], ...base, weekday: q.weekday, freq: q.freq, nth: q.nth || 1, startDate: q.startDate });
+    data.recurring.push({ id: uid(), skips: [], notes: {}, checks: {}, prep: [], ...base, weekday: q.weekday, weekdays: [q.weekday], freq: q.freq, nth: q.nth || 1, startDate: q.startDate });
   } else {
     data.events.push({ id: uid(), ...base, date: q.date, endDate: q.endDate || "", note: "", checks: [], deadline: q.deadline });
   }
@@ -356,17 +372,20 @@ function attachQuick(input, preview) {
 // 메모에 "- [ ] 할 일" 로 쓰면 할 일 목록에 등록, "- [x]" 면 완료 처리. 줄에 날짜가 있으면 그 날로.
 function syncNoteTodos(note, src, date) {
   let created = 0;
+  const seen = new Set();
   for (const line of String(note || "").split("\n")) {
     const m = line.match(/^\s*(?:[-*]\s*)?\[\s*([xX✓v]?)\s*\]\s*(.+)$/);
     if (!m) continue;
     const q = parseQuick(m[2]);
     const text = (q.dateExplicit ? q.title : m[2].trim()) || m[2].trim();
-    const done = !!m[1];
+    const done = !!m[1], todoDate = q.dateExplicit ? q.date : date;
+    seen.add(text);
     const existing = data.todos.find((t) => t.src === src && t.text === text);
-    if (existing) { existing.done = done; continue; }
-    data.todos.push({ id: uid(), date: q.dateExplicit ? q.date : date, text, done, src });
+    if (existing) { existing.done = done; existing.date = todoDate; continue; }
+    data.todos.push({ id: uid(), date: todoDate, text, done, src });
     created++;
   }
+  data.todos = data.todos.filter((t) => t.src !== src || seen.has(t.text));
   if (created) setTimeout(() => toast(`메모에서 할 일 ${created}개를 만들었어요`), 60);
 }
 
@@ -531,7 +550,7 @@ function renderDeck() {
       el("button", { class: "deck-link", title: "Routines 목록 · 회차 Notes", onclick: () => { renderRecurringList(); recDlg.showModal(); } },
         el("strong", {}, "Routines"), el("span", { class: "muted" }, " ›")),
       el("button", { class: "icon-btn small", title: "새 Routine", onclick: () => openNew("recurring", null) }, "+")),
-    recs.length ? null : el("div", { class: "deck-hint" }, "+ Routine 으로 반복 일정 추가"),
+    ...(recs.length ? [] : [el("div", { class: "deck-hint" }, "+ Routine 으로 반복 일정 추가")]),
     ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)));
 }
 
@@ -1079,10 +1098,11 @@ function readForm() {
 
 // 정기 회의를 date 기준으로 둘로 나눔: 기존은 date 전날까지, 새 시리즈는 date부터
 function splitSeries(r, date, changes) {
+  r.seriesId ||= r.id;
   const later = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([k]) => k >= date));
   const earlier = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([k]) => k < date));
   const next = {
-    ...structuredClone(r), id: uid(), ...changes, startDate: date,
+    ...structuredClone(r), id: uid(), ...changes, seriesId: r.seriesId, startDate: date,
     skips: (r.skips || []).filter((x) => x >= date), notes: later(r.notes), checks: later(r.checks),
   };
   r.skips = (r.skips || []).filter((x) => x < date);
@@ -1310,6 +1330,16 @@ const stamp = () => { const d = new Date(); return `${ymd(d)}_${pad(d.getHours()
 const icsEsc = (s) => String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 const icsDate = (ds) => ds.replace(/-/g, "");
 const icsDT = (ds, t) => `${icsDate(ds)}T${t.replace(":", "")}00`;
+const icsEncoder = new TextEncoder();
+const icsFold = (line) => {
+  let out = "", bytes = 0;
+  for (const ch of line) {
+    const size = icsEncoder.encode(ch).length;
+    if (bytes + size > 75) { out += "\r\n "; bytes = 1; }
+    out += ch; bytes += size;
+  }
+  return out;
+};
 
 function buildIcs() {
   const L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Planner//KO", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Planner"];
@@ -1343,7 +1373,7 @@ function buildIcs() {
     let rule = r.freq === "biweekly" ? `FREQ=WEEKLY;INTERVAL=2;BYDAY=${day}`
       : r.freq === "monthly" ? `FREQ=MONTHLY;BYDAY=${routineDays(r).map((d) => `${r.nth || 1}${ICS_DAY[d]}`).join(",")}`
       : `FREQ=WEEKLY;BYDAY=${day}`;
-    if (r.endDate) rule += `;UNTIL=${icsDate(r.endDate)}T235959`;
+    if (r.endDate) rule += `;UNTIL=${icsDate(r.endDate)}${r.start ? "T235959" : ""}`;
     L.push("BEGIN:VEVENT", `UID:${r.id}@planner`, `DTSTAMP:${dtstamp}`, `SUMMARY:${icsEsc(r.title)}`);
     if (r.place) L.push(`LOCATION:${icsEsc(r.place)}`);
     times(first, r);
@@ -1352,7 +1382,7 @@ function buildIcs() {
     L.push("END:VEVENT");
   }
   L.push("END:VCALENDAR");
-  return L.join("\r\n") + "\r\n";
+  return L.map(icsFold).join("\r\n") + "\r\n";
 }
 
 // ═════════════════════════ 주간 돌아보기 ═════════════════════════
@@ -1423,8 +1453,8 @@ $("#closeReview").onclick = () => reviewDlg.close();
 const minutesDlg = $("#minutesDialog");
 let minutesOf = null;
 function minutesEntries(r) {
-  // 분할된 시리즈(같은 제목)와 그 회차에서 파생된 단발 일정까지 모두 모음
-  const series = data.recurring.filter((x) => x === r || x.title === r.title);
+  // 분할된 시리즈와 그 회차에서 파생된 단발 일정까지 모두 모음
+  const series = data.recurring.filter((x) => x === r || sameSeries(x, r));
   const ids = new Set(series.map((x) => x.id));
   const out = [];
   for (const x of series) {
@@ -1673,7 +1703,7 @@ function toggleDeck() {
 if (IN_TAURI && window.__TAURI__.event)
   window.__TAURI__.event.listen("menu", (e) => { if (document.hasFocus()) handleEditCommand(e.payload); });
 document.addEventListener("keydown", (e) => {
-  if (IN_TAURI || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+  if (IN_TAURI || !(e.metaKey || e.ctrlKey) || e.code !== "KeyZ") return;
   const a = document.activeElement;
   if (a && /INPUT|TEXTAREA/.test(a.tagName)) return;
   e.preventDefault();
@@ -1683,22 +1713,22 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keydown", (e) => {
   const anyOpen = [...document.querySelectorAll("dialog")].some((d) => d.open);
   if (IS_MINI || anyOpen) return;
-  if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); return $("#quickInput").focus(); }
-  if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); return openSearch(); }
+  if ((e.metaKey || e.ctrlKey) && e.code === "KeyK") { e.preventDefault(); return $("#quickInput").focus(); }
+  if ((e.metaKey || e.ctrlKey) && e.code === "KeyF") { e.preventDefault(); return openSearch(); }
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || e.metaKey || e.ctrlKey) return;
-  const k = e.key;
+  const k = e.code;
   if (k === "ArrowLeft") shift(-1);
   else if (k === "ArrowRight") shift(1);
-  else if (k === "t") $("#today").click();
-  else if (k === "n") openNew("event", null);
-  else if (k === "r") openNew("recurring", null);
-  else if (k === "w") { if (view === "week") { weekMode = weekMode === "grid" ? "list" : "grid"; try { localStorage.setItem("planner-weekmode", weekMode); } catch {} render(); } else goTo("week"); }
-  else if (k === "m") goTo("month");
-  else if (k === "y") goTo("year");
-  else if (k === "c") toggleDeck();
-  else if (k === "v") openReview();
-  else if (k === "k") { e.preventDefault(); $("#quickInput").focus(); }
-  else if (k === "/") { e.preventDefault(); openSearch(); }
+  else if (k === "KeyT") $("#today").click();
+  else if (k === "KeyN") openNew("event", null);
+  else if (k === "KeyR") openNew("recurring", null);
+  else if (k === "KeyW") { if (view === "week") { weekMode = weekMode === "grid" ? "list" : "grid"; try { localStorage.setItem("planner-weekmode", weekMode); } catch {} render(); } else goTo("week"); }
+  else if (k === "KeyM") goTo("month");
+  else if (k === "KeyY") goTo("year");
+  else if (k === "KeyC") toggleDeck();
+  else if (k === "KeyV") openReview();
+  else if (k === "KeyK") { e.preventDefault(); $("#quickInput").focus(); }
+  else if (k === "Slash") { e.preventDefault(); openSearch(); }
 });
 
 // ═════════════════════════ 시작 / 동기화 ═════════════════════════
@@ -1737,8 +1767,10 @@ reload();
 
 // 다른 창(메뉴바 미니 창 ↔ 메인)에서 바뀐 내용 반영
 window.addEventListener("focus", reload);
-if (IN_TAURI && window.__TAURI__.event)
+if (IN_TAURI && window.__TAURI__.event) {
   window.__TAURI__.event.listen("data-changed", (e) => { if (e.payload !== WINDOW_LABEL) reload(); });
+  window.__TAURI__.event.listen("quit-requested", flush);
+}
 window.addEventListener("blur", flush);
 document.addEventListener("visibilitychange", () => (document.hidden ? flush() : reload()));
 
