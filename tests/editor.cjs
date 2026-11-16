@@ -78,7 +78,7 @@ fields.querySelector = () => dayInputs[0];
 const nodes = {};
 const context = vm.createContext({
   form, $: key => nodes[key] ||= {}, setTime() {}, todayStr: () => '2026-09-30',
-  ymd: () => '2026-09-28', mondayOf() {}, weekStart: {}, syncFreqFields() {},
+  ymd: () => '2026-09-28', mondayOf() {}, weekStart: {}, syncFreqFields() {}, syncTodoFields() {},
   parseYmd: value => new Date(`${value}T00:00:00`), COLORS: ['blue'], renderColors() {}, renderCheckEditor() {}, dlg: { showModal() {} },
 });
 vm.runInContext(source.slice(source.indexOf('const routineDays ='), source.indexOf('function occursOn(')), context);
@@ -177,3 +177,22 @@ vm.runInContext(source.slice(source.indexOf('$("#closeItem").onclick'), source.i
 nodes['#closeItem'].onclick();
 assert.equal(closed, true);
 console.log('Calendar export and top close button passed');
+
+const splitCtx = vm.createContext({});
+vm.runInContext(source.slice(source.indexOf('const splitTodos ='), source.indexOf('function todoList(')), splitCtx);
+assert.deepEqual(Array.from(vm.runInContext('splitTodos(s)', Object.assign(splitCtx, {
+  s: '우유 사기\n- [ ] 과제 제출\n* 메일 답장\n• 세탁\n1. 운동\n- [x] 은행\n\n   \n2) 책 반납',
+}))), ['우유 사기', '과제 제출', '메일 답장', '세탁', '운동', '은행', '책 반납']);
+assert.deepEqual(Array.from(vm.runInContext('splitTodos("2026년 계획 세우기")', splitCtx)), ['2026년 계획 세우기']);
+console.log('Bulk todo splitting passed');
+
+// 반복 To-do: 해당 요일에만 나오고, 일정·ICS에는 안 나옴
+const rtCtx = vm.createContext({ parseYmd: (v) => new Date(`${v}T00:00:00`), mondayOf: (d) => d,
+  data: { recurring: [{ id: 'q', title: '독성학 퀴즈', todo: true, weekdays: [1], startDate: '2026-11-02' }, { id: 'm', title: '회의', weekdays: [1], startDate: '2026-11-02' }] } });
+vm.runInContext(source.slice(source.indexOf('const routineDays ='), source.indexOf('function recLabel(')), rtCtx);
+vm.runInContext(source.slice(source.indexOf('const routineTodos ='), source.indexOf('// 끝나지 않았고')), rtCtx);
+assert.deepEqual(vm.runInContext("routineTodos('2026-11-16').map((r) => r.id)", rtCtx), ['q']);
+assert.equal(vm.runInContext("routineTodos('2026-11-17').length", rtCtx), 0);
+assert.match(source, /data\.recurring\s*\n?\s*\.filter\(\(r\) => !r\.todo && occursOn/);
+assert.match(source, /if \(r\.todo\) continue;/);
+console.log('Recurring to-dos passed');
