@@ -130,8 +130,14 @@ input, textarea, select { user-select: text; }
 .todo-input {
   width: 100%; border: none; background: transparent; color: var(--text);
   font: inherit; font-size: 13px; padding: 4px 2px; outline: none;
+  resize: none; overflow: hidden; display: block;
 }
 .todo-input::placeholder { color: var(--muted); }
+.todo-edit {
+  flex: 1; min-width: 0; border: none; border-bottom: 1px solid var(--accent); background: transparent;
+  color: var(--text); font: inherit; font-size: 13px; padding: 0; outline: none;
+}
+.todo-rec { color: var(--muted); font-size: 11px; }
 
 /* 다이얼로그 */
 dialog {
