@@ -37,14 +37,21 @@ const addMinutes = (t, mins) => fromMin(toMin(t) + mins);
 
 // ═════════════════════════ 데이터 ═════════════════════════
 const DEFAULT_SETTINGS = { notify: true, lead: 10, weeklyReview: true, theme: "system" };
-let data = { recurring: [], events: [], todos: [], cards: [], settings: { ...DEFAULT_SETTINGS } };
+const COLLECTIONS = ["recurring", "events", "todos", "cards", "todoSets"];
+let data = { recurring: [], events: [], todos: [], cards: [], todoSets: [], settings: { ...DEFAULT_SETTINGS } };
 let ready = false;      // 불러오기 성공 전에는 저장 금지 (기존 파일 덮어쓰기 방지)
 let saveTimer = null;
 
 const normalize = (d = {}) => {
   d ||= {};
-  const arrays = Object.fromEntries(["recurring", "events", "todos", "cards"].map((k) => [k, Array.isArray(d[k]) ? d[k] : []]));
-  arrays.recurring = arrays.recurring.map((r) => {
+  const arrays = Object.fromEntries(COLLECTIONS.map((k) => [k, Array.isArray(d[k]) ? d[k] : []]));
+  // v0.4.9의 'To-do로' Routine → To-do 템플릿으로 옮김
+  for (const r of arrays.recurring.filter((r) => r.todo)) {
+    const byDay = (days) => Object.fromEntries(days.map((ds) => [ds, [r.title]]));
+    arrays.todoSets.push({ id: r.id, title: r.title, items: [r.title], weekdays: r.weekdays || [r.weekday], startDate: r.startDate || "",
+      done: byDay(Object.keys(r.done || {}).filter((ds) => r.done[ds])), skip: byDay(r.skips || []) });
+  }
+  arrays.recurring = arrays.recurring.filter((r) => !r.todo).map((r) => {
     const weekdays = Array.isArray(r.weekdays) && r.weekdays.length ? r.weekdays : [r.weekday].filter((x) => x != null);
     return { ...r, weekdays, weekday: weekdays[0] };
   });
@@ -54,7 +61,7 @@ const normalize = (d = {}) => {
 function mergeData(base, local, remote) {
   base = normalize(base); local = normalize(local); remote = normalize(remote);
   const merged = { ...remote, ...local, settings: local.settings };
-  for (const key of ["recurring", "events", "todos", "cards"]) {
+  for (const key of COLLECTIONS) {
     const b = new Map(base[key].map((x) => [x.id, x]));
     const l = new Map(local[key].map((x) => [x.id, x]));
     const r = new Map(remote[key].map((x) => [x.id, x]));
@@ -168,7 +175,7 @@ const occChecks = (r, ds) => (r.checks && r.checks[ds]) || prepToChecks(r.prep);
 function itemsFor(ds) {
   const dow = parseYmd(ds).getDay();
   const rec = data.recurring
-    .filter((r) => !r.todo && occursOn(r, ds, dow))
+    .filter((r) => occursOn(r, ds, dow))
     .map((r) => ({ kind: "recurring", ref: r, date: ds, title: r.title, start: r.start, end: r.end, color: r.color, place: r.place, note: (r.notes || {})[ds], checks: occChecks(r, ds) }));
   const ev = data.events
     .filter((e) => e.date === ds || (e.endDate && e.date <= ds && ds <= e.endDate))
@@ -186,8 +193,16 @@ function itemsFor(ds) {
   return items;
 }
 
-// 반복 To-do: 일정 대신 그날 To-do 목록에 체크박스로 (완료는 날짜별로 r.done 에)
-const routineTodos = (ds) => data.recurring.filter((r) => r.todo && occursOn(r, ds, parseYmd(ds).getDay()));
+// To-do 템플릿 중 요일 반복이 걸려 그 날 자동으로 나오는 것 (완료·건너뛰기는 날짜별로 항목 글자 목록에 저장)
+const setsOn = (ds) => data.todoSets.filter((t) => t.weekdays?.includes(parseYmd(ds).getDay()) && !(t.startDate && ds < t.startDate));
+const setItemsOn = (ds) => setsOn(ds).flatMap((set) => set.items.filter((text) => !set.skip?.[ds]?.includes(text)).map((text) => ({ set, text, done: !!set.done?.[ds]?.includes(text) })));
+const toggleIn = (map = {}, ds, text, on) => {
+  const list = new Set(map[ds] || []);
+  on ? list.add(text) : list.delete(text);
+  const next = { ...map, [ds]: [...list] };
+  if (!list.size) delete next[ds];
+  return next;
+};
 
 // 끝나지 않았고, 뒤를 잇는 시리즈가 없는 정기 회의 (분할된 경우 최신 것만)
 const sameSeries = (a, b) => a.seriesId && b.seriesId ? a.seriesId === b.seriesId : !a.seriesId && !b.seriesId && a.title === b.title;
@@ -427,7 +442,7 @@ function dropTarget(node, ds) {
   node.addEventListener("dragover", (e) => {
     if (!dragging) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = dragging.kind === "card" || dragging.kind === "reccard" || dragging.copy || e.altKey ? "copy" : "move";
+    e.dataTransfer.dropEffect = ["card", "reccard", "todoset"].includes(dragging.kind) || dragging.copy || e.altKey ? "copy" : "move";
     node.classList.add("drop");
   });
   node.addEventListener("dragleave", (e) => { if (!node.contains(e.relatedTarget)) node.classList.remove("drop"); });
@@ -465,9 +480,10 @@ function moveTo({ kind, ref, date, copy }, ds, time) {
     persist(); render(); return warnConflict(ds, ref.title);
   }
   // 정기 회의 카드 → 그 날 한 번 더 (보강 회의)
-  if (kind === "reccard" && ref.todo) {
-    data.todos.push({ id: uid(), date: ds, text: ref.title, done: false });
-    persist(); render(); return toast(`'${ref.title}'을(를) ${fmtDate(ds)} To-do에 추가했어요`);
+  // To-do 템플릿 → 그 날 To-do로 한 번에
+  if (kind === "todoset") {
+    data.todos.push(...ref.items.map((text) => ({ id: uid(), date: ds, text, done: false })));
+    persist(); render(); return toast(`'${ref.title}' To-do ${ref.items.length}개를 ${fmtDate(ds)}에 추가했어요`);
   }
   if (kind === "reccard") {
     data.events.push(applyTime(eventFrom(ref, ds, { checks: prepToChecks(ref.prep), fromRecurring: ref.id }), time));
@@ -558,7 +574,18 @@ function renderDeck() {
         el("strong", {}, "Routines"), el("span", { class: "muted" }, " ›")),
       el("button", { class: "icon-btn small", title: "새 Routine", onclick: () => openNew("recurring", null) }, "+")),
     ...(recs.length ? [] : [el("div", { class: "deck-hint" }, "+ Routine 으로 반복 일정 추가")]),
-    ...recs.map((r) => cardEl("reccard", r, r.todo ? `${recLabel(r)} · To-do` : `${recLabel(r)} ${r.start || ""}`)));
+    ...recs.map((r) => cardEl("reccard", r, `${recLabel(r)} ${r.start || ""}`)),
+    el("div", { class: "deck-head sub" },
+      el("strong", {}, "To-do"),
+      el("button", { class: "icon-btn small", title: "새 To-do 템플릿", onclick: () => openTodoSet(null) }, "+")),
+    ...(data.todoSets.length ? [] : [el("div", { class: "deck-hint" }, "+ 자주 하는 할 일 묶음 · 날짜로 끌어 놓기")]),
+    ...data.todoSets.map((t) => draggable(
+      el("div", { class: "deck-card", style: `--c:${COLORS[5]}`, onclick: () => openTodoSet(t) },
+        el("div", { class: "deck-title" }, t.title),
+        el("div", { class: "deck-sub" }, (t.weekdays?.length ? `매주 ${dayList(t.weekdays)} · ` : "") + `${t.items.length}개`),
+        ...t.items.slice(0, 3).map((x) => el("div", { class: "deck-sub" }, "☐ " + x)),
+        ...(t.items.length > 3 ? [el("div", { class: "deck-sub" }, `+${t.items.length - 3}개`)] : [])),
+      { kind: "todoset", ref: t, date: null })));
 }
 
 function renderDday() {
@@ -670,14 +697,13 @@ function todoList(ds, { withCarry = false } = {}) {
     if (overdue.length)
       box.append(el("button", { class: "carry", onclick: () => carryOver(ds) }, `↪ 밀린 To-do ${overdue.length}개 가져오기`));
   }
-  for (const r of routineTodos(ds)) {
-    const done = !!r.done?.[ds];
+  for (const { set, text, done } of setItemsOn(ds)) {
     const cb = el("input", { type: "checkbox" });
     cb.checked = done;
-    cb.addEventListener("change", () => { r.done = { ...r.done, [ds]: cb.checked }; if (!cb.checked) delete r.done[ds]; persist(); render(); });
+    cb.addEventListener("change", () => { set.done = toggleIn(set.done, ds, text, cb.checked); persist(); render(); });
     box.append(el("div", { class: "todo" + (done ? " done" : "") }, cb,
-      el("span", { title: `${recLabel(r)} 반복 · 더블클릭해서 수정`, ondblclick: () => fillForm({ kind: "recurring", ref: r, date: null }) }, r.title, el("span", { class: "todo-rec" }, " ↻")),
-      el("button", { class: "x", title: "이 날만 건너뛰기", onclick: () => { r.skips = [...new Set([...(r.skips || []), ds])]; persist(); render(); toast("이 날만 건너뛰었어요 · ⌘Z"); } }, "×")));
+      el("span", { title: `'${set.title}' 템플릿 · 더블클릭해서 템플릿 수정`, ondblclick: () => openTodoSet(set) }, text, el("span", { class: "todo-rec" }, " ↻")),
+      el("button", { class: "x", title: "이 날만 빼기", onclick: () => { set.skip = toggleIn(set.skip, ds, text, true); persist(); render(); toast("이 날만 뺐어요 · ⌘Z"); } }, "×")));
   }
   for (const t of data.todos.filter((t) => t.date === ds)) {
     const cb = el("input", { type: "checkbox" });
@@ -874,7 +900,7 @@ function renderMonth(main, y, m) {
     const d = addDays(start, i);
     const ds = ymd(d);
     const items = itemsFor(ds);
-    const todos = [...data.todos.filter((t) => t.date === ds), ...routineTodos(ds).map((r) => ({ done: !!r.done?.[ds] }))];
+    const todos = [...data.todos.filter((t) => t.date === ds), ...setItemsOn(ds)];
     main.append(dropTarget(
       el("div", { class: "m-cell" + (d.getMonth() !== m ? " out" : "") + (ds === today ? " today" : ""), onclick: () => goTo("week", d) },
         el("div", { class: "m-top" },
@@ -976,13 +1002,6 @@ function setWeekdays(days) {
 $("#closeItem").onclick = () => dlg.close();
 const syncFreqFields = () => { $("#nthField").hidden = form.freq.value !== "monthly"; };
 form.freq.addEventListener("change", syncFreqFields);
-// 반복 To-do는 시간·장소·Prep 없이 제목만
-function syncTodoFields() {
-  const todo = form.asTodo.checked && !$("#asTodoField").hidden;
-  for (const id of ["#timeRow", "#placeField", "#checkBox"]) $(id).hidden = todo;
-  if (todo) { setTime(form.start, ""); setTime(form.end, ""); }
-}
-form.asTodo.addEventListener("change", syncTodoFields);
 
 // ── 24시간제 시간 입력: "13", "1300", "13:00", "9:30", "930" 모두 허용
 function parseTime(str) {
@@ -1114,9 +1133,6 @@ function fillForm({ kind, ref, date }) {
   form.scope.value = "future";
   $("#startDateField").hidden = isOcc;
   $("#recEndDateField").hidden = isOcc;
-  $("#asTodoField").hidden = !isRec || isOcc;
-  form.asTodo.checked = isRec && !!v.todo;
-  syncTodoFields();
 
   // 메모: 일정·카드는 항상, 정기 회의는 회차에서만
   const showNote = !isRec || isOcc;
@@ -1200,8 +1216,6 @@ form.addEventListener("submit", (e) => {
       }
       form.recEndDate.classList.remove("invalid");
       rule.endDate = endDate;
-      rule.todo = form.asTodo.checked;
-      if (rule.todo) Object.assign(base, { start: "", end: "", place: "" });
     }
     if (!ref) {
       data.recurring.push({ id: uid(), skips: [], notes: {}, checks: {}, prep, ...base, ...rule, startDate: form.startDate.value || todayStr() });
@@ -1291,6 +1305,39 @@ function renderRecurringList() {
     : [el("li", { class: "empty" }, "아직 Routine이 없어요")]));
 }
 $("#closeRecurring").onclick = () => recDlg.close();
+
+// ═════════════════════════ To-do 템플릿 ═════════════════════════
+const dayList = (days) => WEEK_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAMES[d]).join("·");
+
+const todoSetDlg = $("#todoSetDialog"), setForm = $("#todoSetForm");
+let editingSet = null;
+function openTodoSet(set) {
+  editingSet = set;
+  $("#todoSetTitle").textContent = set ? "To-do 템플릿" : "New To-do 템플릿";
+  setForm.title.value = set?.title || "";
+  setForm.items.value = (set?.items || []).join("\n");
+  setForm.querySelectorAll('input[name="setDays"]').forEach((x) => (x.checked = !!set?.weekdays?.includes(Number(x.value))));
+  $("#deleteTodoSet").hidden = !set;
+  todoSetDlg.showModal();
+  setForm.title.focus();
+}
+setForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const title = setForm.title.value.trim(), items = splitTodos(setForm.items.value);
+  if (!title) return setForm.title.focus();
+  if (!items.length) { toast("할 일을 하나 이상 적어 주세요"); return setForm.items.focus(); }
+  const weekdays = [...setForm.querySelectorAll('input[name="setDays"]:checked')].map((x) => Number(x.value));
+  // 반복을 새로 켜면 오늘부터 (지난 주에 소급해서 나오지 않게)
+  const startDate = weekdays.length && !editingSet?.weekdays?.length ? todayStr() : editingSet?.startDate || "";
+  if (editingSet) Object.assign(editingSet, { title, items, weekdays, startDate });
+  else data.todoSets.push({ id: uid(), title, items, weekdays, startDate, done: {}, skip: {} });
+  persist(); render(); todoSetDlg.close();
+});
+$("#deleteTodoSet").onclick = () => {
+  data.todoSets = data.todoSets.filter((t) => t !== editingSet);
+  persist(); render(); todoSetDlg.close(); toast("삭제됨 · ⌘Z");
+};
+$("#cancelTodoSet").onclick = $("#closeTodoSet").onclick = () => todoSetDlg.close();
 
 // ═════════════════════════ 검색 ═════════════════════════
 const searchDlg = $("#searchDialog");
@@ -1429,7 +1476,6 @@ function buildIcs() {
     L.push("END:VEVENT");
   }
   for (const r of data.recurring) {
-    if (r.todo) continue;
     // 첫 회차 찾기 (건너뛴 날 포함해서 규칙상 첫 날짜)
     const first = firstOccurrence(r);
     if (!first) continue;
