@@ -78,7 +78,7 @@ fields.querySelector = () => dayInputs[0];
 const nodes = {};
 const context = vm.createContext({
   form, $: key => nodes[key] ||= {}, setTime() {}, todayStr: () => '2026-09-30',
-  ymd: () => '2026-09-28', mondayOf() {}, weekStart: {}, syncFreqFields() {}, syncTodoFields() {},
+  ymd: () => '2026-09-28', mondayOf() {}, weekStart: {}, syncFreqFields() {},
   parseYmd: value => new Date(`${value}T00:00:00`), COLORS: ['blue'], renderColors() {}, renderCheckEditor() {}, dlg: { showModal() {} },
 });
 vm.runInContext(source.slice(source.indexOf('const routineDays ='), source.indexOf('function occursOn(')), context);
@@ -96,7 +96,7 @@ for (const [ref, date, expected] of [
 }
 let opened;
 Object.assign(context, {
-  view: 'week', deckOpen: true, data: { cards: [], recurring: [] },
+  view: 'week', deckOpen: true, data: { cards: [], recurring: [], todoSets: [] },
   activeSeries: () => [], toggleDeck() {},
   el: (tag, props, ...children) => ({ tag, props, children }),
   openNew: (...args) => { opened = args; },
@@ -186,13 +186,21 @@ assert.deepEqual(Array.from(vm.runInContext('splitTodos(s)', Object.assign(split
 assert.deepEqual(Array.from(vm.runInContext('splitTodos("2026년 계획 세우기")', splitCtx)), ['2026년 계획 세우기']);
 console.log('Bulk todo splitting passed');
 
-// 반복 To-do: 해당 요일에만 나오고, 일정·ICS에는 안 나옴
-const rtCtx = vm.createContext({ parseYmd: (v) => new Date(`${v}T00:00:00`), mondayOf: (d) => d,
-  data: { recurring: [{ id: 'q', title: '독성학 퀴즈', todo: true, weekdays: [1], startDate: '2026-11-02' }, { id: 'm', title: '회의', weekdays: [1], startDate: '2026-11-02' }] } });
-vm.runInContext(source.slice(source.indexOf('const routineDays ='), source.indexOf('function recLabel(')), rtCtx);
-vm.runInContext(source.slice(source.indexOf('const routineTodos ='), source.indexOf('// 끝나지 않았고')), rtCtx);
-assert.deepEqual(vm.runInContext("routineTodos('2026-11-16').map((r) => r.id)", rtCtx), ['q']);
-assert.equal(vm.runInContext("routineTodos('2026-11-17').length", rtCtx), 0);
-assert.match(source, /data\.recurring\s*\n?\s*\.filter\(\(r\) => !r\.todo && occursOn/);
-assert.match(source, /if \(r\.todo\) continue;/);
-console.log('Recurring to-dos passed');
+// To-do 템플릿: 반복 요일에만 나오고, 완료·빼기는 날짜별. 예전 'To-do로' Routine은 템플릿으로 옮겨짐
+const tsCtx = vm.createContext({ parseYmd: (v) => new Date(`${v}T00:00:00`), data: { todoSets: [
+  { id: 's', title: '수업 루틴', items: ['대매체 수강', '독성학 퀴즈'], weekdays: [1, 3], startDate: '2026-11-16', done: { '2026-11-16': ['대매체 수강'] }, skip: { '2026-11-18': ['독성학 퀴즈'] } },
+  { id: 'n', title: '장보기', items: ['우유'], weekdays: [] },
+] } });
+vm.runInContext(source.slice(source.indexOf('const setsOn ='), source.indexOf('// 끝나지 않았고')), tsCtx);
+const on = (ds) => vm.runInContext(`setItemsOn('${ds}').map((x) => x.text + (x.done ? '✓' : ''))`, tsCtx);
+assert.deepEqual(Array.from(on('2026-11-16')), ['대매체 수강✓', '독성학 퀴즈']);
+assert.deepEqual(Array.from(on('2026-11-18')), ['대매체 수강']);
+assert.deepEqual(Array.from(on('2026-11-17')), []);
+assert.deepEqual(Array.from(on('2026-11-09')), []);   // 시작일 전에는 안 나옴
+assert.equal(vm.runInContext("JSON.stringify(toggleIn({ a: ['x'] }, 'a', 'x', false))", tsCtx), '{}');
+const migCtx = vm.createContext({ DEFAULT_SETTINGS: {} });
+vm.runInContext(source.slice(source.indexOf('const COLLECTIONS ='), source.indexOf('let data =')) + source.slice(source.indexOf('const normalize ='), source.indexOf('function mergeData(')), migCtx);
+const mig = vm.runInContext(`normalize({ recurring: [{ id: 'q', title: '퀴즈', todo: true, weekdays: [1], startDate: '2026-11-16', done: { '2026-11-16': true }, skips: ['2026-11-23'] }, { id: 'm', title: '회의', weekdays: [2] }] })`, migCtx);
+assert.deepEqual(Array.from(mig.recurring, (r) => r.id), ['m']);
+assert.deepEqual(JSON.parse(JSON.stringify(mig.todoSets)), [{ id: 'q', title: '퀴즈', items: ['퀴즈'], weekdays: [1], startDate: '2026-11-16', done: { '2026-11-16': ['퀴즈'] }, skip: { '2026-11-23': ['퀴즈'] } }]);
+console.log('To-do templates and migration passed');
